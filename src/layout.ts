@@ -25,30 +25,6 @@ export const LAYOUTS = {
     columns: "var(--sidebar-w) var(--list-w) 1fr",
     rows: "auto 1fr var(--similar-h) auto",
   },
-
-  // Waveform across the full width, list beneath. Better on a wide monitor.
-  wide: {
-    areas: `
-      "search  search  search"
-      "sidebar detail  detail"
-      "sidebar list    similar"
-      "status  status  status"
-    `,
-    columns: "var(--sidebar-w) 1fr var(--similar-w)",
-    rows: "auto var(--detail-h) 1fr auto",
-  },
-
-  // Narrow docked mode for sitting beside a script or NLE.
-  compact: {
-    areas: `
-      "search"
-      "detail"
-      "list"
-      "status"
-    `,
-    columns: "1fr",
-    rows: "auto var(--detail-h) 1fr auto",
-  },
 } satisfies Record<string, Layout>;
 
 export type LayoutName = keyof typeof LAYOUTS;

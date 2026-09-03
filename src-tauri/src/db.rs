@@ -188,7 +188,9 @@ impl Db {
     pub fn all_items(&self) -> Result<Vec<crate::search::Item>> {
         let mut st = self.conn.prepare(
             "SELECT f.id, f.filename, f.rel_path, f.duration_ms, f.channels,
-                    f.sample_rate, f.ext, f.content_key
+                    f.sample_rate, f.ext, f.content_key, f.scanned_at, f.mtime,
+                    COALESCE((SELECT MAX(played_at) FROM plays p
+                              WHERE p.content_key = f.content_key), 0)
              FROM files f WHERE f.status = 'ok' ORDER BY f.rel_path",
         )?;
         let rows = st
@@ -204,6 +206,9 @@ impl Db {
                     sample_rate: r.get(5)?,
                     ext: r.get(6)?,
                     content_key: r.get(7)?,
+                    added_at: r.get(8)?,
+                    mtime: r.get(9)?,
+                    last_played: r.get(10)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -231,6 +236,23 @@ impl Db {
             )?;
         let path = std::path::Path::new(&root).join(rel).to_string_lossy().to_string();
         Ok((path, key, lufs, peak))
+    }
+
+    /// Removes a root and its file rows. Peaks blobs are content-keyed and may
+    /// be shared with another root, so they are deliberately left alone.
+    pub fn remove_root(&self, root_id: i64) -> Result<usize> {
+        let n = self.conn.execute("DELETE FROM files WHERE root_id = ?1", params![root_id])?;
+        self.conn.execute("DELETE FROM roots WHERE id = ?1", params![root_id])?;
+        Ok(n)
+    }
+
+    pub fn record_play(&self, id: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO plays (content_key, played_at)
+             SELECT content_key, ?2 FROM files WHERE id = ?1",
+            params![id, now()],
+        )?;
+        Ok(())
     }
 
     pub fn count(&self) -> Result<i64> {

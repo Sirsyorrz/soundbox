@@ -17,6 +17,7 @@ pub enum Cmd {
     Stop,
     SetLooping(bool),
     SetGain(f32),
+    SetVolume(f32),
     Quit,
 }
 
@@ -26,7 +27,10 @@ struct Shared {
     pos: f64,
     region: (usize, usize),
     looping: bool,
+    /// Per-file normalisation.
     gain: f32,
+    /// Master volume, set by the user.
+    volume: f32,
 }
 
 /// Handle to the audio thread.
@@ -115,6 +119,7 @@ fn build_stream(pos: Arc<AtomicU64>, playing: Arc<AtomicBool>) -> Result<Built> 
         region: (0, 0),
         looping: false,
         gain: 1.0,
+        volume: 1.0,
     }));
 
     let cb = shared.clone();
@@ -158,7 +163,7 @@ fn build_stream(pos: Arc<AtomicU64>, playing: Arc<AtomicBool>) -> Result<Built> 
                 let fade = ((s.pos - rs as f64) / FADE_FRAMES)
                     .min((re as f64 - s.pos) / FADE_FRAMES)
                     .clamp(0.0, 1.0) as f32;
-                let g = s.gain * fade;
+                let g = s.gain * s.volume * fade;
                 for c in 0..channels {
                     let v = audio.samples.get(i * src_ch + c.min(src_ch - 1)).copied().unwrap_or(0.0);
                     out[f * channels + c] = v * g;
@@ -218,6 +223,7 @@ fn run(
             }
             Cmd::SetLooping(l) => s.looping = l,
             Cmd::SetGain(g) => s.gain = g,
+            Cmd::SetVolume(v) => s.volume = v.clamp(0.0, 2.0),
             Cmd::Quit => return,
         }
     }

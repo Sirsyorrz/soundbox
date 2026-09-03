@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import type { Hit, Item, Loaded } from "../types";
+import type { Hit, Item, Loaded, Root, Sort } from "../types";
 import type { LayoutName } from "../layout";
 
 const SEARCH_LIMIT = 500;
@@ -15,6 +15,9 @@ interface State {
   pos: number;
   looping: boolean;
   normalise: boolean;
+  volume: number;
+  sort: Sort;
+  roots: Root[];
   librarySize: number;
   scanning: { done: number; total: number } | null;
   device: string;
@@ -31,6 +34,10 @@ interface State {
   stop: () => void;
   setLooping: (v: boolean) => void;
   setNormalise: (v: boolean) => Promise<void>;
+  setVolume: (v: number) => void;
+  setSort: (s: Sort) => Promise<void>;
+  loadRoots: () => Promise<void>;
+  removeRoot: (id: number) => Promise<void>;
   setLayout: (l: LayoutName) => void;
   addFolder: () => Promise<void>;
   tick: () => Promise<void>;
@@ -47,6 +54,9 @@ export const useStore = create<State>((set, get) => ({
   pos: 0,
   looping: false,
   normalise: true,
+  volume: 1,
+  sort: "relevance",
+  roots: [],
   librarySize: 0,
   scanning: null,
   device: "",
@@ -64,6 +74,7 @@ export const useStore = create<State>((set, get) => ({
     const hits = await invoke<[Hit, Item][]>("search", {
       query: get().query,
       limit: SEARCH_LIMIT,
+      sort: get().sort,
     });
     const size = await invoke<number>("library_size");
     set({ hits, librarySize: size });
@@ -115,6 +126,28 @@ export const useStore = create<State>((set, get) => ({
     if (selected >= 0) await get().select(selected);
   },
 
+  setVolume: (volume) => {
+    set({ volume });
+    void invoke("set_volume", { volume });
+  },
+
+  setSort: async (sort) => {
+    set({ sort });
+    await get().refresh();
+  },
+
+  loadRoots: async () => {
+    const rows = await invoke<[number, string, string][]>("roots");
+    set({ roots: rows.map(([id, path, label]) => ({ id, path, label })) });
+  },
+
+  removeRoot: async (id) => {
+    await invoke("remove_root", { id });
+    set({ selected: -1, current: null, region: null });
+    await get().loadRoots();
+    await get().refresh();
+  },
+
   setLayout: (layout) => set({ layout }),
 
   addFolder: async () => {
@@ -124,6 +157,7 @@ export const useStore = create<State>((set, get) => ({
     try {
       const n = await invoke<number>("add_root", { path: dir });
       set({ message: `indexed ${n} files` });
+      await get().loadRoots();
       await get().refresh();
     } catch (e) {
       set({ message: `scan failed: ${e}` });

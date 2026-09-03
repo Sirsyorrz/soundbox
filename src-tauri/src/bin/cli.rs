@@ -173,7 +173,7 @@ fn cmd_search(args: &[String]) -> Result<()> {
 
     for q in args {
         let t = std::time::Instant::now();
-        let hits = ix.search(q, 20);
+        let hits = ix.search(q, 20, soundbox::search::Sort::Relevance);
         let el = t.elapsed();
         println!("\n  \"{q}\" -> {} hits in {:?}", hits.len(), el);
         for h in hits.iter().take(5) {

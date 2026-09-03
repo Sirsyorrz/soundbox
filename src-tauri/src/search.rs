@@ -17,6 +17,9 @@ pub struct Item {
     pub sample_rate: u32,
     pub ext: String,
     pub content_key: String,
+    pub added_at: i64,
+    pub mtime: i64,
+    pub last_played: i64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -27,6 +30,17 @@ pub struct Hit {
     pub indices: Vec<u32>,
     /// True when pulled in by a folder match rather than its own name.
     pub via_folder: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sort {
+    Relevance,
+    Name,
+    Added,
+    Modified,
+    Recent,
+    Duration,
 }
 
 pub struct Index {
@@ -55,14 +69,16 @@ impl Index {
         self.items.iter().find(|i| i.id == id)
     }
 
-    pub fn search(&mut self, query: &str, limit: usize) -> Vec<Hit> {
+    pub fn search(&mut self, query: &str, limit: usize, sort: Sort) -> Vec<Hit> {
         if query.trim().is_empty() {
-            return self
+            let mut hits: Vec<Hit> = self
                 .items
                 .iter()
-                .take(limit)
                 .map(|i| Hit { id: i.id, score: 0, indices: Vec::new(), via_folder: false })
                 .collect();
+            self.apply_sort(&mut hits, sort, Sort::Name);
+            hits.truncate(limit);
+            return hits;
         }
 
         let pat = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
@@ -105,9 +121,35 @@ impl Index {
             hits.push(Hit { id: item.id, score, indices, via_folder });
         }
 
-        hits.sort_unstable_by(|a, b| b.score.cmp(&a.score).then(a.id.cmp(&b.id)));
+        self.apply_sort(&mut hits, sort, Sort::Relevance);
         hits.truncate(limit);
         hits
+    }
+
+    /// `fallback` is used when the caller asks for relevance but there are no
+    /// scores to rank by, i.e. an empty query.
+    fn apply_sort(&self, hits: &mut [Hit], sort: Sort, fallback: Sort) {
+        let sort = if sort == Sort::Relevance { fallback } else { sort };
+        let by = |id: i64| self.items.iter().find(|i| i.id == id);
+        match sort {
+            Sort::Relevance => {
+                hits.sort_unstable_by(|a, b| b.score.cmp(&a.score).then(a.id.cmp(&b.id)))
+            }
+            Sort::Name => hits.sort_by_cached_key(|h| {
+                by(h.id).map(|i| i.filename.to_lowercase()).unwrap_or_default()
+            }),
+            Sort::Added => hits.sort_by_cached_key(|h| by(h.id).map(|i| -i.added_at).unwrap_or(0)),
+            Sort::Modified => hits.sort_by_cached_key(|h| by(h.id).map(|i| -i.mtime).unwrap_or(0)),
+            Sort::Recent => {
+                // Never-played files sort last rather than first.
+                hits.sort_by_cached_key(|h| {
+                    by(h.id).map(|i| if i.last_played == 0 { i64::MAX } else { -i.last_played }).unwrap_or(i64::MAX)
+                })
+            }
+            Sort::Duration => {
+                hits.sort_by_cached_key(|h| by(h.id).map(|i| i.duration_ms).unwrap_or(0))
+            }
+        }
     }
 }
 
@@ -125,6 +167,9 @@ mod tests {
             sample_rate: 48000,
             ext: "wav".into(),
             content_key: format!("b3:{id}"),
+            added_at: id,
+            mtime: id,
+            last_played: 0,
         }
     }
 
@@ -139,18 +184,18 @@ mod tests {
 
     #[test]
     fn empty_query_returns_everything() {
-        assert_eq!(index().search("", 100).len(), 4);
+        assert_eq!(index().search("", 100, Sort::Relevance).len(), 4);
     }
 
     #[test]
     fn typo_tolerant_on_filenames() {
-        let hits = index().search("fatby", 10);
+        let hits = index().search("fatby", 10, Sort::Relevance);
         assert_eq!(hits[0].id, 4, "fuzzy match should survive a dropped letter");
     }
 
     #[test]
     fn folder_match_pulls_in_contents() {
-        let hits = index().search("fart", 10);
+        let hits = index().search("fart", 10, Sort::Relevance);
         let ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
         assert!(ids.contains(&1) && ids.contains(&2), "both files in SFX/Farts, got {ids:?}");
         assert!(hits.iter().filter(|h| h.id == 1 || h.id == 2).all(|h| h.via_folder));
@@ -162,13 +207,13 @@ mod tests {
             item(1, "Music", "impact.wav"),
             item(2, "SFX/Impacts/Metal", "clang.wav"),
         ]);
-        let hits = ix.search("impact", 10);
+        let hits = ix.search("impact", 10, Sort::Relevance);
         assert_eq!(hits[0].id, 1, "direct filename hit should win");
     }
 
     #[test]
     fn highlight_indices_point_into_the_filename() {
-        let hits = index().search("hit", 10);
+        let hits = index().search("hit", 10, Sort::Relevance);
         let h = hits.iter().find(|h| h.id == 3).expect("hit_03.wav should match");
         assert_eq!(h.indices, vec![0, 1, 2]);
     }

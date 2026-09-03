@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use soundbox::db::Db;
 use soundbox::player::{normalise_gain, Cmd, Player};
-use soundbox::search::{Hit, Index};
+use soundbox::search::{Hit, Index, Sort};
 use soundbox::{audio, cache, scan};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -22,6 +22,9 @@ struct App {
 struct CurrentFile {
     frames: usize,
 }
+
+/// Enough detail for a full-width waveform without sending megabytes to the UI.
+const DETAIL_BUCKETS: usize = 4000;
 
 fn base_dir() -> PathBuf {
     dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("SoundBox")
@@ -125,9 +128,9 @@ fn library_size(state: State<'_, App>) -> usize {
 }
 
 #[tauri::command]
-fn search(state: State<'_, App>, query: String, limit: usize) -> Vec<(Hit, ItemDto)> {
+fn search(state: State<'_, App>, query: String, limit: usize, sort: Sort) -> Vec<(Hit, ItemDto)> {
     let mut ix = state.index.lock().unwrap();
-    let hits = ix.search(&query, limit);
+    let hits = ix.search(&query, limit, sort);
     hits.into_iter()
         .filter_map(|h| {
             ix.get(h.id).map(|i| {
@@ -155,19 +158,19 @@ fn file_path(state: State<'_, App>, id: i64) -> Result<String, String> {
 
 #[tauri::command]
 async fn load(state: State<'_, App>, id: i64, normalise: bool) -> Result<LoadedDto, String> {
-    let (path, key, lufs, peak_db) = {
+    let (path, _key, lufs, peak_db) = {
         let db = state.db.lock().unwrap();
-        db.load_info(id).map_err(|e| e.to_string())?
+        let info = db.load_info(id).map_err(|e| e.to_string())?;
+        let _ = db.record_play(id);
+        info
     };
 
     let decoded = Arc::new(audio::decode_file(std::path::Path::new(&path)).map_err(|e| e.to_string())?);
 
-    // Prefer the cached peaks; fall back to computing them if the blob is
-    // missing or was written by an older cache version.
-    let peaks = match cache::read(&state.base, &key) {
-        Ok(p) => p.to_f32(),
-        Err(_) => cache::build(&decoded).to_f32(),
-    };
+    // The cached level is a coarse 2048 samples/bucket, which is far too blocky
+    // for a short sound. The file is already decoded here, so build detail peaks
+    // at display resolution instead.
+    let peaks = cache::build_n(&decoded, DETAIL_BUCKETS).to_f32();
 
     let gain = if normalise {
         normalise_gain(lufs, -18.0, peak_db.unwrap_or(-1.0))
@@ -219,6 +222,22 @@ fn set_looping(state: State<'_, App>, looping: bool) {
     if let Some(p) = &state.player {
         p.send(Cmd::SetLooping(looping));
     }
+}
+
+#[tauri::command]
+fn set_volume(state: State<'_, App>, volume: f32) {
+    if let Some(p) = &state.player {
+        p.send(Cmd::SetVolume(volume));
+    }
+}
+
+#[tauri::command]
+async fn remove_root(state: State<'_, App>, id: i64) -> Result<usize, String> {
+    {
+        let db = state.db.lock().unwrap();
+        db.remove_root(id).map_err(|e| e.to_string())?;
+    }
+    reload_index(&state)
 }
 
 #[tauri::command]
@@ -281,6 +300,8 @@ fn main() {
             toggle,
             stop,
             set_looping,
+            set_volume,
+            remove_root,
             status,
             device_info
         ])

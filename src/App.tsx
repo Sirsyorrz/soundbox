@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "./state/store";
-import { layoutStyle, LAYOUTS, type LayoutName } from "./layout";
+import { layoutStyle } from "./layout";
+import type { Sort } from "./types";
 import { Waveform } from "./panels/Waveform";
 import { List } from "./panels/List";
 import "./app.css";
@@ -15,8 +16,10 @@ function Search() {
   const setLooping = useStore((s) => s.setLooping);
   const normalise = useStore((s) => s.normalise);
   const setNormalise = useStore((s) => s.setNormalise);
-  const layout = useStore((s) => s.layout);
-  const setLayout = useStore((s) => s.setLayout);
+  const sort = useStore((s) => s.sort);
+  const setSort = useStore((s) => s.setSort);
+  const volume = useStore((s) => s.volume);
+  const setVolume = useStore((s) => s.setVolume);
   const ref = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -54,13 +57,29 @@ function Search() {
         />
         normalise
       </label>
-      <select value={layout} onChange={(e) => setLayout(e.target.value as LayoutName)}>
-        {Object.keys(LAYOUTS).map((k) => (
-          <option key={k} value={k}>
-            {k}
-          </option>
-        ))}
+      <select
+        value={sort}
+        title="Sort order"
+        onChange={(e) => void setSort(e.target.value as Sort)}
+      >
+        <option value="relevance">relevance</option>
+        <option value="name">name</option>
+        <option value="added">recently added</option>
+        <option value="modified">file date</option>
+        <option value="recent">recently played</option>
+        <option value="duration">duration</option>
       </select>
+      <label className="vol" title={`Volume ${Math.round(volume * 100)}%`}>
+        vol
+        <input
+          type="range"
+          min={0}
+          max={1.5}
+          step={0.01}
+          value={volume}
+          onChange={(e) => setVolume(Number(e.target.value))}
+        />
+      </label>
     </div>
   );
 }
@@ -95,6 +114,10 @@ function Detail() {
 function Sidebar() {
   const librarySize = useStore((s) => s.librarySize);
   const hits = useStore((s) => s.hits);
+  const roots = useStore((s) => s.roots);
+  const removeRoot = useStore((s) => s.removeRoot);
+  const addFolder = useStore((s) => s.addFolder);
+
   return (
     <div className="sidebar">
       <div className="sidebar-h">Library</div>
@@ -103,6 +126,27 @@ function Sidebar() {
       </div>
       <div className="stat">
         <b>{hits.length.toLocaleString()}</b> shown
+      </div>
+
+      <div className="sidebar-h">Folders</div>
+      {roots.length === 0 && <div className="dim pad">none yet</div>}
+      {roots.map((r) => (
+        <div className="root" key={r.id} title={r.path}>
+          <span className="root-label">{r.label}</span>
+          <button
+            className="x"
+            title={`Remove ${r.path} from the library.\nFiles on disk are not touched.`}
+            onClick={() => {
+              if (confirm(`Remove "${r.label}" from the library?\n\nNo files on disk are deleted.`))
+                void removeRoot(r.id);
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <div className="pad">
+        <button onClick={() => void addFolder()}>Add folder…</button>
       </div>
     </div>
   );
@@ -135,6 +179,7 @@ export default function App() {
 
   useEffect(() => {
     void useStore.getState().refresh();
+    void useStore.getState().loadRoots();
     void invoke<string>("device_info").then((device) => useStore.setState({ device }));
 
     const un = listen<{ done: number; total: number }>("scan:progress", (e) =>

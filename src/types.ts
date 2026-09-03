@@ -15,6 +15,14 @@ export interface Hit {
   via_folder: boolean;
 }
 
+export type Sort = "relevance" | "name" | "added" | "modified" | "recent" | "duration";
+
+export interface Root {
+  id: number;
+  path: string;
+  label: string;
+}
+
 export interface Loaded {
   id: number;
   path: string;

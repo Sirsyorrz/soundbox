@@ -141,3 +141,42 @@
 .spacer {
   flex: 1;
 }
+
+.vol {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--fg-dim);
+}
+.vol input[type="range"] {
+  width: 90px;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.root {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-3);
+}
+.root:hover {
+  background: var(--row-hover);
+}
+.root-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.root .x {
+  padding: 0 6px;
+  line-height: 1.2;
+  background: none;
+  border-color: transparent;
+  color: var(--fg-faint);
+}
+.root .x:hover {
+  color: var(--bad);
+  border-color: var(--bad);
+}

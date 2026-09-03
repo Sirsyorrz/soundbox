@@ -119,13 +119,23 @@ pub fn read(cache_dir: &Path, content_key: &str) -> Result<Peaks> {
 }
 
 pub fn build(d: &crate::audio::Decoded) -> Peaks {
+    build_n(d, d.frames().div_ceil(BUCKET_SAMPLES).max(1))
+}
+
+/// Peaks at an explicit resolution, for the detail view.
+///
+/// The cached level is far too coarse to draw a short sound: a 1-second clip is
+/// only ~21 buckets, which renders as visible blocks. Detail views ask for a
+/// bucket count matched to the canvas instead.
+pub fn build_n(d: &crate::audio::Decoded, buckets: usize) -> Peaks {
     let frames = d.frames();
-    let buckets = frames.div_ceil(BUCKET_SAMPLES).max(1);
+    let buckets = buckets.clamp(1, frames.max(1));
+    let per = frames as f64 / buckets as f64;
     let mut data = vec![Vec::with_capacity(buckets); d.channels];
 
     for b in 0..buckets {
-        let start = b * BUCKET_SAMPLES;
-        let end = ((b + 1) * BUCKET_SAMPLES).min(frames);
+        let start = (b as f64 * per) as usize;
+        let end = (((b + 1) as f64 * per) as usize).clamp(start + 1, frames);
         for (ch, out) in data.iter_mut().enumerate() {
             let mut lo = 0.0f32;
             let mut hi = 0.0f32;
@@ -146,7 +156,7 @@ pub fn build(d: &crate::audio::Decoded) -> Peaks {
     Peaks {
         sample_rate: d.sample_rate,
         channels: d.channels,
-        bucket_samples: BUCKET_SAMPLES,
+        bucket_samples: per.round().max(1.0) as usize,
         data,
     }
 }
@@ -170,20 +180,30 @@ mod tests {
             let back = decode(&encode(&p)).unwrap();
             assert_eq!(back.channels, ch);
             assert_eq!(back.sample_rate, 48000);
-            assert_eq!(back.bucket_samples, BUCKET_SAMPLES);
+            assert_eq!(back.bucket_samples, p.bucket_samples);
             assert_eq!(back.buckets(), p.buckets());
             assert_eq!(back.data, p.data);
         }
     }
 
     #[test]
+    fn detail_resolution_is_honoured() {
+        let d = synth(2, 44_100);
+        assert_eq!(build_n(&d, 4000).buckets(), 4000);
+        // A short file cannot have more buckets than it has frames.
+        assert_eq!(build_n(&synth(1, 300), 4000).buckets(), 300);
+    }
+
+    #[test]
     fn peaks_bracket_the_signal() {
         let d = synth(2, 10_000);
-        let f = build(&d).to_f32();
+        let p = build(&d);
+        let per = d.frames() as f64 / p.buckets() as f64;
+        let f = p.to_f32();
         for (c, ch) in f.iter().enumerate() {
             for (b, (lo, hi)) in ch.iter().enumerate() {
-                let start = b * BUCKET_SAMPLES;
-                let end = ((b + 1) * BUCKET_SAMPLES).min(d.frames());
+                let start = (b as f64 * per) as usize;
+                let end = (((b + 1) as f64 * per) as usize).clamp(start + 1, d.frames());
                 for i in start..end {
                     let v = d.samples[i * d.channels + c];
                     assert!(v >= lo - 1e-3 && v <= hi + 1e-3, "sample {v} outside [{lo},{hi}]");
