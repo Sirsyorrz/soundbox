@@ -8,7 +8,10 @@ export function Settings() {
   const setShowShortcuts = useStore((s) => s.setShowShortcuts);
   const clearTags = useStore((s) => s.clearTags);
   const exportPack = useStore((s) => s.exportPack);
-  const userTags = useStore((s) => s.tags.filter(([, , isUser]) => isUser));
+  // Filtered in the render body, not the selector: a selector returning a new
+  // array every call makes useSyncExternalStore throw and blanks the app.
+  const tags = useStore((s) => s.tags);
+  const userTags = tags.filter(([, , isUser]) => isUser);
 
   if (!open) return null;
 

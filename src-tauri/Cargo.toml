@@ -1,6 +1,6 @@
 [package]
 name = "soundbox"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 # The crate ships a CLI too, so bundling needs to be told which one is the app.
 default-run = "soundbox-app"

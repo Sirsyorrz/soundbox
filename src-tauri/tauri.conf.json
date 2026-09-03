@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SoundBox",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "dev.soundbox.app",
   "build": {
     "frontendDist": "../dist",
