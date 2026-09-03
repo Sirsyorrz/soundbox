@@ -6,3 +6,4 @@ pub mod ident;
 pub mod player;
 pub mod scan;
 pub mod search;
+pub mod similar;
