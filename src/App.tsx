@@ -128,6 +128,7 @@ function Sidebar() {
     <div className="sidebar">
       <Profiles />
 
+      <Failed />
       <TagRail />
 
       <div className="sidebar-h">Folders</div>
@@ -155,6 +156,43 @@ function Sidebar() {
         </div>
       ))}
     </div>
+  );
+}
+
+function Failed() {
+  const failed = useStore((s) => s.failed);
+  const open = useStore((s) => s.showFailed);
+  const setOpen = useStore((s) => s.setShowFailed);
+  if (failed.length === 0) return null;
+
+  return (
+    <>
+      <div className="tagrow warn" onClick={() => setOpen(true)}>
+        <span>⚠ {failed.length} failed to read</span>
+      </div>
+      {open && (
+        <div className="modal-back" onClick={() => setOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-h">
+              <b>Files that could not be read</b>
+              <span className="spacer" />
+              <button onClick={() => setOpen(false)}>Close</button>
+            </div>
+            <div className="modal-body">
+              <div className="pad dim">
+                These are indexed but cannot be decoded, so they have no waveform and
+                will not play. Usually an unsupported codec or a truncated file.
+              </div>
+              {failed.map(([name, path]) => (
+                <div className="keyrow" key={path} title={path}>
+                  <span className="keylabel">{name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -226,6 +264,12 @@ function Profiles() {
       </div>
       <div className="profile-actions">
         <button
+          title="Delete cached waveforms no profile refers to any more"
+          onClick={() => void useStore.getState().pruneCache()}
+        >
+          Clean cache
+        </button>
+        <button
           title="Rebindable keyboard shortcuts  ( Ctrl + / )"
           onClick={() => useStore.getState().setShowShortcuts(true)}
         >
@@ -252,6 +296,11 @@ function Status() {
     <div className="status">
       <Updater manual={nonce > checked} onDone={() => setChecked(nonce)} />
       <span>{scanning ? `scanning ${scanning.done}/${scanning.total}` : message}</span>
+      {scanning && (
+        <button className="x" title="Stop scanning" onClick={() => useStore.getState().cancelScan()}>
+          stop
+        </button>
+      )}
       <span className="spacer" />
       <span className="dim">{device}</span>
     </div>
@@ -267,6 +316,7 @@ export default function App() {
     void useStore.getState().loadRoots();
     void useStore.getState().loadProfiles();
     void useStore.getState().loadTags();
+    void useStore.getState().loadFailed();
     // The store restored these from disk; the audio thread has not seen them.
     void invoke("set_volume", { volume: useStore.getState().volume });
     void invoke("set_looping", { looping: useStore.getState().looping });

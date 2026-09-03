@@ -13,6 +13,7 @@ export function Similar() {
   const selectById = useStore((s) => s.selectById);
   const gate = useStore((s) => s.similarGate);
   const setGate = useStore((s) => s.setSimilarGate);
+  const filter = useStore((s) => s.filter);
 
   const [rows, setRows] = useState<SimilarDto[]>([]);
   const [busy, setBusy] = useState(false);
@@ -24,7 +25,7 @@ export function Similar() {
     }
     let stale = false;
     setBusy(true);
-    invoke<SimilarDto[]>("similar", { id: current.id, limit: 40, gate })
+    invoke<SimilarDto[]>("similar", { id: current.id, limit: 40, gate, filter })
       .then((r) => {
         if (!stale) setRows(r);
       })
@@ -34,7 +35,7 @@ export function Similar() {
     return () => {
       stale = true;
     };
-  }, [current, gate]);
+  }, [current, gate, filter]);
 
   return (
     <div className="similar">

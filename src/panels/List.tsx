@@ -11,7 +11,8 @@ const DRAG_ICON =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKklEQVR42mNgGAWjYBSMglEwCkbBKBgFo2AUjIJRMApGwSgYBaNgFAxvAAAI8AAB0Y6l0QAAAABJRU5ErkJggg==";
 
 interface Column {
-  key: Sort | "wave";
+  /** Non-sortable columns are display-only, so their key is not a sort order. */
+  key: Sort | "wave" | "tags";
   label: string;
   /** Grid track sizing; the name column takes the slack. */
   width: string;
@@ -27,6 +28,7 @@ const COLUMNS: Column[] = [
   { key: "wave", label: "Wave", width: `${SPARK_W + 16}px`, sortable: false },
   { key: "folder", label: "Folder", width: "minmax(80px, 1fr)" },
   { key: "duration", label: "Dur", width: "56px", align: "right" },
+  { key: "tags", label: "Tags", width: "minmax(70px, 1fr)", sortable: false },
   { key: "modified", label: "Date", width: "84px", align: "right" },
 ];
 
@@ -216,6 +218,9 @@ export function List() {
                   {item.folder || "."}
                 </div>
                 <div className="td r num">{dur(item.duration_ms)}</div>
+                <div className="td tags-cell" title={item.tags.join(", ")}>
+                  {item.tags.join(" ")}
+                </div>
                 <div className="td r num">{date(item.mtime)}</div>
               </div>
             );

@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use anyhow::Result;
 use rayon::prelude::*;
@@ -19,6 +19,7 @@ pub struct ScanStats {
     pub analysed: usize,
     pub skipped: usize,
     pub failed: usize,
+    pub cancelled: bool,
     pub elapsed_ms: u128,
     /// (path, reason) for files that produced no row at all. These are retried
     /// on every scan, so they must be surfaced rather than silently counted.
@@ -131,6 +132,23 @@ pub fn scan_root<F>(
 where
     F: Fn(Progress) + Sync + Send,
 {
+    scan_root_cancellable(db, cache_dir, root_id, root, on_progress, &AtomicBool::new(false))
+}
+
+/// `cancel` is checked per file. Whatever was analysed before cancelling is
+/// still committed, so stopping a long scan keeps the work already done and a
+/// later rescan picks up where it left off.
+pub fn scan_root_cancellable<F>(
+    db: &Db,
+    cache_dir: &Path,
+    root_id: i64,
+    root: &Path,
+    on_progress: F,
+    cancel: &AtomicBool,
+) -> Result<ScanStats>
+where
+    F: Fn(Progress) + Sync + Send,
+{
     let started = std::time::Instant::now();
     let files = candidates(root);
     let total = files.len();
@@ -150,6 +168,9 @@ where
         .par_iter()
         .zip(snapshots.par_iter())
         .map(|(path, snap)| {
+            if cancel.load(Ordering::Relaxed) {
+                return (path.clone(), Ok(Outcome::Skipped));
+            }
             let r = analyse(root, root_id, path, cache_dir, *snap);
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             on_progress(Progress { done: n, total, path: path.to_string_lossy().to_string() });
@@ -157,7 +178,8 @@ where
         })
         .collect();
 
-    let mut stats = ScanStats { total, ..Default::default() };
+    let mut stats =
+        ScanStats { total, cancelled: cancel.load(Ordering::Relaxed), ..Default::default() };
     let tx = db.conn.unchecked_transaction()?;
     for (path, r) in results {
         match r {

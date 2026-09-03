@@ -21,6 +21,7 @@ struct App {
     current: Mutex<Option<CurrentFile>>,
     base: PathBuf,
     reg: Mutex<Registry>,
+    cancel_scan: std::sync::atomic::AtomicBool,
 }
 
 struct CurrentFile {
@@ -51,6 +52,9 @@ struct ItemDto {
     last_played: i64,
     favorite: bool,
     tags: Vec<String>,
+    /// Which of `tags` came from the folder path, so the UI can show them as
+    /// fixed rather than removable.
+    folder_tags: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -153,12 +157,21 @@ async fn add_root(
 
     let stats = {
         let db = state.db.lock().unwrap();
-        scan::scan_root(&db, &state.base, root_id, &dir, |p| {
-            // Throttle: one event per 1% is plenty for a progress bar.
-            if p.total < 100 || p.done % (p.total / 100).max(1) == 0 {
-                let _ = handle.emit("scan:progress", ScanEvent { done: p.done, total: p.total });
-            }
-        })
+        state.cancel_scan.store(false, std::sync::atomic::Ordering::Relaxed);
+        scan::scan_root_cancellable(
+            &db,
+            &state.base,
+            root_id,
+            &dir,
+            |p| {
+                // Throttle: one event per 1% is plenty for a progress bar.
+                if p.total < 100 || p.done % (p.total / 100).max(1) == 0 {
+                    let _ =
+                        handle.emit("scan:progress", ScanEvent { done: p.done, total: p.total });
+                }
+            },
+            &state.cancel_scan,
+        )
         .map_err(|e| e.to_string())?
     };
     let _ = handle.emit("scan:done", stats.total);
@@ -186,11 +199,20 @@ async fn rescan_root(
     }
     {
         let db = state.db.lock().unwrap();
-        scan::scan_root(&db, &state.base, id, &dir, |p| {
-            if p.total < 100 || p.done % (p.total / 100).max(1) == 0 {
-                let _ = handle.emit("scan:progress", ScanEvent { done: p.done, total: p.total });
-            }
-        })
+        state.cancel_scan.store(false, std::sync::atomic::Ordering::Relaxed);
+        scan::scan_root_cancellable(
+            &db,
+            &state.base,
+            id,
+            &dir,
+            |p| {
+                if p.total < 100 || p.done % (p.total / 100).max(1) == 0 {
+                    let _ =
+                        handle.emit("scan:progress", ScanEvent { done: p.done, total: p.total });
+                }
+            },
+            &state.cancel_scan,
+        )
         .map_err(|e| e.to_string())?;
     }
     let _ = handle.emit("scan:done", 0usize);
@@ -236,6 +258,7 @@ fn search(
                         last_played: i.last_played,
                         favorite: i.favorite,
                         tags: i.tags.clone(),
+                        folder_tags: i.folder_tags.clone(),
                     },
                 )
             })
@@ -250,12 +273,23 @@ struct SimilarDto {
 }
 
 #[tauri::command]
-fn similar(state: State<'_, App>, id: i64, limit: usize, gate: bool) -> Vec<SimilarDto> {
+fn similar(
+    state: State<'_, App>,
+    id: i64,
+    limit: usize,
+    gate: bool,
+    filter: soundbox::search::Filter,
+) -> Vec<SimilarDto> {
     let ratio = if gate { DEFAULT_DURATION_RATIO } else { 0.0 };
-    let neighbours = state.similar.lock().unwrap().query(id, limit, ratio);
+    // Neighbours are ranked before filtering, so over-fetch or a restrictive
+    // filter would leave the panel short of results.
+    let want = if filter.is_active() { (limit * 20).min(2000) } else { limit };
+    let neighbours = state.similar.lock().unwrap().query(id, want, ratio);
     let ix = state.index.lock().unwrap();
     neighbours
         .into_iter()
+        .filter(|n| ix.get(n.id).map(|i| filter.keeps(i)).unwrap_or(false))
+        .take(limit)
         .filter_map(|n| {
             ix.get(n.id).map(|i| SimilarDto {
                 item: ItemDto {
@@ -271,6 +305,7 @@ fn similar(state: State<'_, App>, id: i64, limit: usize, gate: bool) -> Vec<Simi
                     last_played: i.last_played,
                     favorite: i.favorite,
                     tags: i.tags.clone(),
+                    folder_tags: i.folder_tags.clone(),
                 },
                 score: n.score,
             })
@@ -338,6 +373,43 @@ fn tags(state: State<'_, App>) -> Vec<(String, i64)> {
     let mut out: Vec<(String, i64)> = counts.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
     out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     out
+}
+
+/// Blobs are shared between profiles, so every profile has to be consulted
+/// before deciding a blob is unreferenced.
+#[tauri::command]
+async fn prune_cache(state: State<'_, App>) -> Result<cache::Pruned, String> {
+    let (ids, active) = {
+        let reg = state.reg.lock().unwrap();
+        (reg.profiles.iter().map(|p| p.id.clone()).collect::<Vec<_>>(), reg.active.clone())
+    };
+
+    let mut keep = std::collections::HashSet::new();
+    for id in ids {
+        let keys = if id == active {
+            state.db.lock().unwrap().all_content_keys().map_err(|e| e.to_string())?
+        } else {
+            // Opened read-only-ish and dropped immediately; the active profile's
+            // connection is the one held open.
+            match Db::open(&profiles::db_path(&state.base, &id)) {
+                Ok(db) => db.all_content_keys().map_err(|e| e.to_string())?,
+                Err(e) => return Err(format!("could not read profile {id}: {e}")),
+            }
+        };
+        keep.extend(keys);
+    }
+
+    cache::prune(&state.base, &keep).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cancel_scan(state: State<'_, App>) {
+    state.cancel_scan.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn failed_files(state: State<'_, App>) -> Result<Vec<(String, String)>, String> {
+    state.db.lock().unwrap().failed_files().map_err(|e| e.to_string())
 }
 
 #[derive(Serialize)]
@@ -633,6 +705,7 @@ fn main() {
                 current: Mutex::new(None),
                 base,
                 reg: Mutex::new(reg),
+                cancel_scan: std::sync::atomic::AtomicBool::new(false),
             });
             Ok(())
         })
@@ -660,6 +733,9 @@ fn main() {
             tag_file,
             untag_file,
             tags,
+            prune_cache,
+            cancel_scan,
+            failed_files,
             similar,
             sparklines,
             load,

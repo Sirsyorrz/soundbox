@@ -298,3 +298,82 @@ mod tests {
         assert!(p.ends_with("peaks/ab/cdef.pk"), "{p:?}");
     }
 }
+
+#[derive(Debug, Default, serde::Serialize)]
+pub struct Pruned {
+    pub removed: usize,
+    pub bytes: u64,
+}
+
+/// Deletes peak blobs no profile refers to any more.
+///
+/// The cache is shared between profiles and keyed by content, so `keep` must be
+/// the union across every profile. Pruning against a single profile would throw
+/// away blobs another one is still using.
+pub fn prune(cache_dir: &Path, keep: &std::collections::HashSet<String>) -> Result<Pruned> {
+    let root = cache_dir.join("peaks");
+    if !root.is_dir() {
+        return Ok(Pruned::default());
+    }
+    let wanted: std::collections::HashSet<PathBuf> =
+        keep.iter().map(|k| blob_path(cache_dir, k)).collect();
+
+    let mut out = Pruned::default();
+    for shard in std::fs::read_dir(&root)?.filter_map(|e| e.ok()) {
+        if !shard.path().is_dir() {
+            continue;
+        }
+        for blob in std::fs::read_dir(shard.path())?.filter_map(|e| e.ok()) {
+            let path = blob.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("pk") {
+                continue;
+            }
+            if wanted.contains(&path) {
+                continue;
+            }
+            let size = blob.metadata().map(|m| m.len()).unwrap_or(0);
+            if std::fs::remove_file(&path).is_ok() {
+                out.removed += 1;
+                out.bytes += size;
+            }
+        }
+        // Tidy the shard directory once it is empty.
+        let _ = std::fs::remove_dir(shard.path());
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn keeps_referenced_blobs_and_removes_the_rest() {
+        let dir = std::env::temp_dir().join(format!("sb_prune_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let keys = ["b3:aa11", "b3:bb22", "b3:cc33"];
+        for k in keys {
+            let p = blob_path(&dir, k);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, b"12345").unwrap();
+        }
+
+        let keep: HashSet<String> = ["b3:aa11".to_string()].into_iter().collect();
+        let out = prune(&dir, &keep).unwrap();
+
+        assert_eq!(out.removed, 2);
+        assert_eq!(out.bytes, 10);
+        assert!(blob_path(&dir, "b3:aa11").exists(), "referenced blob must survive");
+        assert!(!blob_path(&dir, "b3:bb22").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_cache_directory_is_not_an_error() {
+        let dir = std::env::temp_dir().join(format!("sb_prune_none_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(prune(&dir, &HashSet::new()).unwrap().removed, 0);
+    }
+}

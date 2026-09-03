@@ -77,6 +77,12 @@ interface State {
   setBinding: (id: string, combos: string[]) => void;
   resetBinding: (id: string) => void;
   resetBindings: () => void;
+  failed: [string, string][];
+  loadFailed: () => Promise<void>;
+  showFailed: boolean;
+  setShowFailed: (v: boolean) => void;
+  cancelScan: () => void;
+  pruneCache: () => Promise<void>;
   showShortcuts: boolean;
   setShowShortcuts: (v: boolean) => void;
   loadProfiles: () => Promise<void>;
@@ -107,6 +113,8 @@ export const useStore = create<State>((set, get) => ({
   registry: null,
   updateNonce: 0,
   keymap: SAVED.keymap,
+  failed: [],
+  showFailed: false,
   showShortcuts: false,
   sort: SAVED.sort,
   desc: SAVED.desc,
@@ -265,6 +273,27 @@ export const useStore = create<State>((set, get) => ({
 
   setShowShortcuts: (showShortcuts) => set({ showShortcuts }),
 
+  loadFailed: async () => {
+    set({ failed: await invoke<[string, string][]>("failed_files") });
+  },
+
+  setShowFailed: (showFailed) => set({ showFailed }),
+
+  cancelScan: () => {
+    void invoke("cancel_scan");
+    set({ message: "stopping scan…" });
+  },
+
+  pruneCache: async () => {
+    const r = await invoke<{ removed: number; bytes: number }>("prune_cache");
+    const mb = (r.bytes / 1048576).toFixed(1);
+    set({
+      message: r.removed
+        ? `removed ${r.removed.toLocaleString()} unused waveforms (${mb} MB)`
+        : "cache is already clean",
+    });
+  },
+
   loadTags: async () => {
     const tags = await invoke<[string, number][]>("tags");
     // Filtering by a tag that no longer exists would show an empty list with
@@ -390,6 +419,7 @@ export const useStore = create<State>((set, get) => ({
       const n = await invoke<number>("rescan_root", { id });
       clearSparks();
       set({ message: `${n} sounds indexed` });
+      await get().loadFailed();
       await get().refresh();
     } catch (e) {
       set({ message: `rescan failed: ${e}` });
@@ -409,6 +439,7 @@ export const useStore = create<State>((set, get) => ({
       clearSparks();
       set({ message: `indexed ${n} files` });
       await get().loadRoots();
+      await get().loadFailed();
       await get().refresh();
       // A pack shipped with the sounds is the whole point of packs.
       const found = await invoke<string | null>("pack_in_root", { path: dir });

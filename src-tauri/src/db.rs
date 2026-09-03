@@ -552,6 +552,24 @@ impl Db {
         }
     }
 
+    pub fn all_content_keys(&self) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare("SELECT DISTINCT content_key FROM files")?;
+        let rows = st.query_map([], |r| r.get(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Files that could not be decoded, so the UI can explain the shortfall.
+    pub fn failed_files(&self) -> Result<Vec<(String, String)>> {
+        let mut st = self.conn.prepare(
+            "SELECT f.filename, r.path || '/' || f.rel_path
+             FROM files f JOIN roots r ON r.id = f.root_id
+             WHERE f.status <> 'ok' ORDER BY f.filename",
+        )?;
+        let rows =
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     pub fn count(&self) -> Result<i64> {
         Ok(self.conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?)
     }

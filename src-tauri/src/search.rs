@@ -39,7 +39,11 @@ pub struct Filter {
 }
 
 impl Filter {
-    fn keeps(&self, i: &Item) -> bool {
+    pub fn is_active(&self) -> bool {
+        self.favorites_only || self.tag.is_some()
+    }
+
+    pub fn keeps(&self, i: &Item) -> bool {
         if self.favorites_only && !i.favorite {
             return false;
         }
