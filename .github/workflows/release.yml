@@ -1,0 +1,67 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish, e.g. v0.1.0"
+        required: true
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis
+            artifact: src-tauri/target/release/bundle/nsis/*-setup.exe
+          - os: ubuntu-22.04
+            bundles: appimage
+            artifact: src-tauri/target/release/bundle/appimage/*.AppImage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Bundle
+        run: npx tauri build --bundles ${{ matrix.bundles }}
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: SoundBox ${{ github.event.inputs.tag || github.ref_name }}
+          draft: false
+          prerelease: true
+          fail_on_unmatched_files: true
+          files: ${{ matrix.artifact }}
+          body: |
+            Early test build. Windows is unproven at runtime, so expect rough edges.
+
+            **Windows:** download the `-setup.exe`. SmartScreen will warn because the
+            binary is unsigned - "More info" then "Run anyway".
+
+            **Linux:** download the `.AppImage`, `chmod +x` it, and run it.
+
+            Please report: whether audio plays, whether dragging a sound into your
+            editor works, and anything that looks wrong.
