@@ -9,6 +9,8 @@ import { Similar } from "./panels/Similar";
 import { RenameBox, TagEditor, TagRail } from "./panels/Tags";
 import { Splitter, useSplitters } from "./panels/Splitter";
 import { Updater } from "./panels/Updater";
+import { Shortcuts } from "./panels/Shortcuts";
+import { ACTIONS, comboOf, resolveTable } from "./actions";
 import "./app.css";
 
 function Search() {
@@ -23,21 +25,11 @@ function Search() {
   const setVolume = useStore((s) => s.setVolume);
   const ref = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const f = (e: KeyboardEvent) => {
-      if (e.key === "/" && document.activeElement?.tagName !== "INPUT") {
-        e.preventDefault();
-        ref.current?.focus();
-      }
-    };
-    addEventListener("keydown", f);
-    return () => removeEventListener("keydown", f);
-  }, []);
-
   return (
     <div className="search">
       <button onClick={() => void addFolder()}>Add folder…</button>
       <input
+        id="search-input"
         ref={ref}
         value={query}
         placeholder="search…   ( / to focus )"
@@ -119,6 +111,7 @@ function Detail() {
           <span className="dim">select a sound</span>
         )}
       </div>
+      <Shortcuts />
       <RenameBox />
       <TagEditor />
       <Waveform />
@@ -233,6 +226,12 @@ function Profiles() {
       </div>
       <div className="profile-actions">
         <button
+          title="Rebindable keyboard shortcuts  ( Ctrl + / )"
+          onClick={() => useStore.getState().setShowShortcuts(true)}
+        >
+          Shortcuts
+        </button>
+        <button
           title="Check GitHub for a newer version"
           onClick={() => useStore.setState((v) => ({ updateNonce: v.updateNonce + 1 }))}
         >
@@ -268,6 +267,10 @@ export default function App() {
     void useStore.getState().loadRoots();
     void useStore.getState().loadProfiles();
     void useStore.getState().loadTags();
+    void useStore.getState().loadFolderTags();
+    // The store restored these from disk; the audio thread has not seen them.
+    void invoke("set_volume", { volume: useStore.getState().volume });
+    void invoke("set_looping", { looping: useStore.getState().looping });
     void invoke<string>("device_info").then((device) => useStore.setState({ device }));
 
     const un = listen<{ done: number; total: number }>("scan:progress", (e) =>
@@ -281,49 +284,89 @@ export default function App() {
     };
   }, []);
 
+  const keymap = useStore((s) => s.keymap);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const inInput = (e.target as HTMLElement)?.tagName === "INPUT";
+    const table = resolveTable(keymap);
+
+    const run = (id: string) => {
       const s = useStore.getState();
-      if (e.code === "Space" && !inInput) {
-        e.preventDefault();
-        s.toggle();
-      }
-      if (e.code === "ArrowDown" && !inInput) {
-        e.preventDefault();
-        void s.move(1);
-      }
-      if (e.code === "ArrowUp" && !inInput) {
-        e.preventDefault();
-        void s.move(-1);
-      }
-      if (e.code === "KeyL" && !inInput) s.setLooping(!s.looping);
-      if (inInput) return;
-      if (e.code === "BracketLeft") s.markIn();
-      if (e.code === "BracketRight") s.markOut();
-      if (e.code === "Equal" || e.code === "NumpadAdd") s.zoom(0.5);
-      if (e.code === "Minus" || e.code === "NumpadSubtract") s.zoom(2);
-      if (e.code === "Digit0" || e.code === "Numpad0") s.zoomToFit();
-      if (e.code === "KeyZ" && !e.ctrlKey) s.zoomToRegion();
-      if (e.code === "Enter" && s.region) s.playRegion(s.region);
       const item = s.currentItem();
-      if (e.code === "KeyF" && item) void s.toggleFavorite(item.id);
-      if (e.code === "F2" && item) {
-        e.preventDefault();
-        s.beginRename();
+      switch (id) {
+        case "search.focus":
+          document.getElementById("search-input")?.focus();
+          return true;
+        case "search.clear":
+          s.setQuery("");
+          return true;
+        case "transport.playPause":
+          s.toggle();
+          return true;
+        case "transport.playRegion":
+          if (s.region) s.playRegion(s.region);
+          return true;
+        case "transport.loop":
+          s.setLooping(!s.looping);
+          return true;
+        case "nav.up":
+          void s.move(-1);
+          return true;
+        case "nav.down":
+          void s.move(1);
+          return true;
+        case "region.in":
+          s.markIn();
+          return true;
+        case "region.out":
+          s.markOut();
+          return true;
+        case "zoom.in":
+          s.zoom(0.5);
+          return true;
+        case "zoom.out":
+          s.zoom(2);
+          return true;
+        case "zoom.fit":
+          s.zoomToFit();
+          return true;
+        case "zoom.region":
+          s.zoomToRegion();
+          return true;
+        case "organise.favorite":
+          if (item) void s.toggleFavorite(item.id);
+          return true;
+        case "organise.tag":
+          if (item) document.getElementById("tag-input")?.focus();
+          return true;
+        case "organise.rename":
+          if (item) s.beginRename();
+          return true;
+        case "organise.undo":
+          void s.undoRename();
+          return true;
+        case "app.shortcuts":
+          s.setShowShortcuts(!s.showShortcuts);
+          return true;
       }
-      if (e.code === "KeyZ" && e.ctrlKey) {
-        e.preventDefault();
-        void s.undoRename();
-      }
-      if (e.code === "KeyT" && item) {
-        e.preventDefault();
-        document.getElementById("tag-input")?.focus();
-      }
+      return false;
     };
+
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing = el?.tagName === "INPUT" || el?.tagName === "TEXTAREA";
+      const id = table.get(comboOf(e));
+      if (!id) return;
+
+      // While typing, only actions declared for the search context fire, so
+      // ordinary letters are never swallowed.
+      const def = ACTIONS.find((a) => a.id === id);
+      if (typing && def?.context !== "search") return;
+
+      if (run(id)) e.preventDefault();
+    };
+
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, []);
+  }, [keymap]);
 
   return (
     <div style={layoutStyle(layout)}>

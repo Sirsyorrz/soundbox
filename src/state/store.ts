@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type { Filter, Hit, Item, Loaded, PackPreview, Registry, Root, Sort } from "../types";
 import { clearSparks } from "../panels/Sparkline";
+import { loadSettings, saveSettings } from "../settings";
+import type { Keymap } from "../actions";
 import type { LayoutName } from "../layout";
 
 const SEARCH_LIMIT = 500;
@@ -71,6 +73,14 @@ interface State {
   addFolder: () => Promise<void>;
   registry: Registry | null;
   updateNonce: number;
+  folderTags: [string, number][];
+  loadFolderTags: () => Promise<void>;
+  keymap: Keymap;
+  setBinding: (id: string, combos: string[]) => void;
+  resetBinding: (id: string) => void;
+  resetBindings: () => void;
+  showShortcuts: boolean;
+  setShowShortcuts: (v: boolean) => void;
   loadProfiles: () => Promise<void>;
   switchProfile: (id: string) => Promise<void>;
   createProfile: (name: string) => Promise<void>;
@@ -82,6 +92,8 @@ interface State {
   say: (m: string) => void;
 }
 
+const SAVED = loadSettings();
+
 export const useStore = create<State>((set, get) => ({
   query: "",
   hits: [],
@@ -91,13 +103,16 @@ export const useStore = create<State>((set, get) => ({
   view: null,
   playing: false,
   pos: 0,
-  looping: false,
-  normalise: true,
-  volume: 1,
+  looping: SAVED.looping,
+  normalise: SAVED.normalise,
+  volume: SAVED.volume,
   registry: null,
   updateNonce: 0,
-  sort: "relevance",
-  desc: false,
+  folderTags: [],
+  keymap: SAVED.keymap,
+  showShortcuts: false,
+  sort: SAVED.sort,
+  desc: SAVED.desc,
   rowH: 26,
   similarGate: true,
   roots: [],
@@ -163,7 +178,10 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  setSimilarGate: (similarGate) => set({ similarGate }),
+  setSimilarGate: (similarGate) => {
+    set({ similarGate });
+    saveSettings({ similarGate });
+  },
 
   // The list row is the source of truth for tags; the loaded audio payload
   // deliberately carries none so tag edits do not require a re-decode.
@@ -227,6 +245,32 @@ export const useStore = create<State>((set, get) => ({
     await get().loadTags();
     await get().refresh();
   },
+
+  loadFolderTags: async () => {
+    set({ folderTags: await invoke<[string, number][]>("folder_tags") });
+  },
+
+  setBinding: (id, combos) => {
+    const keymap = { ...get().keymap, [id]: combos };
+    set({ keymap });
+    saveSettings({ keymap });
+  },
+
+  resetBinding: (id) => {
+    // Removing the override rather than writing the current default, so a
+    // default changed in a later release still carries over.
+    const keymap = { ...get().keymap };
+    delete keymap[id];
+    set({ keymap });
+    saveSettings({ keymap });
+  },
+
+  resetBindings: () => {
+    set({ keymap: {} });
+    saveSettings({ keymap: {} });
+  },
+
+  setShowShortcuts: (showShortcuts) => set({ showShortcuts }),
 
   loadTags: async () => {
     const tags = await invoke<[string, number][]>("tags");
@@ -301,11 +345,13 @@ export const useStore = create<State>((set, get) => ({
 
   setLooping: (looping) => {
     set({ looping });
+    saveSettings({ looping });
     void invoke("set_looping", { looping });
   },
 
   setNormalise: async (normalise) => {
     set({ normalise });
+    saveSettings({ normalise });
     // Gain is applied at load time, so re-load to hear the change.
     const { selected } = get();
     if (selected >= 0) await get().select(selected);
@@ -313,11 +359,13 @@ export const useStore = create<State>((set, get) => ({
 
   setVolume: (volume) => {
     set({ volume });
+    saveSettings({ volume });
     void invoke("set_volume", { volume });
   },
 
   setSort: async (sort) => {
     set({ sort });
+    saveSettings({ sort });
     await get().refresh();
   },
 
@@ -325,7 +373,9 @@ export const useStore = create<State>((set, get) => ({
   // column flips direction.
   sortBy: async (key) => {
     const { sort, desc } = get();
-    set(sort === key ? { desc: !desc } : { sort: key, desc: false });
+    const next = sort === key ? { sort, desc: !desc } : { sort: key, desc: false };
+    set(next);
+    saveSettings(next);
     await get().refresh();
   },
 
@@ -338,6 +388,7 @@ export const useStore = create<State>((set, get) => ({
     await invoke("remove_root", { id });
     set({ selected: -1, current: null, region: null });
     await get().loadRoots();
+    await get().loadFolderTags();
     await get().refresh();
   },
 
@@ -347,6 +398,7 @@ export const useStore = create<State>((set, get) => ({
       const n = await invoke<number>("rescan_root", { id });
       clearSparks();
       set({ message: `${n} sounds indexed` });
+      await get().loadFolderTags();
       await get().refresh();
     } catch (e) {
       set({ message: `rescan failed: ${e}` });
@@ -366,6 +418,7 @@ export const useStore = create<State>((set, get) => ({
       clearSparks();
       set({ message: `indexed ${n} files` });
       await get().loadRoots();
+      await get().loadFolderTags();
       await get().refresh();
       // A pack shipped with the sounds is the whole point of packs.
       const found = await invoke<string | null>("pack_in_root", { path: dir });
@@ -388,6 +441,7 @@ export const useStore = create<State>((set, get) => ({
     await get().loadProfiles();
     await get().loadRoots();
     await get().loadTags();
+    await get().loadFolderTags();
     clearSparks();
     set({ query: "", selected: -1, current: null, message: `${n} sounds` });
     await get().refresh();

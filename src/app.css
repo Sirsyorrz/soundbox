@@ -498,3 +498,61 @@ body.row-resize * {
   padding: 2px 8px;
   font-size: var(--fs-sm);
 }
+
+.tagrow.folder .tagname::before {
+  content: "▸ ";
+  color: var(--fg-faint);
+}
+.tagrow.more {
+  font-size: var(--fs-sm);
+}
+
+.modal-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  width: min(620px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.modal-h {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--line);
+}
+.modal-body {
+  overflow-y: auto;
+  padding-bottom: var(--sp-2);
+}
+.keyrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 3px var(--sp-2);
+}
+.keylabel {
+  flex: 1;
+  min-width: 0;
+}
+.keybind {
+  min-width: 130px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+.keybind.capturing {
+  border-color: var(--accent);
+  color: var(--accent);
+}

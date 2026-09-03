@@ -90,8 +90,13 @@ export function RenameBox() {
 
 export function TagRail() {
   const tags = useStore((s) => s.tags);
+  const folderTags = useStore((s) => s.folderTags);
   const filter = useStore((s) => s.filter);
   const setFilter = useStore((s) => s.setFilter);
+  const [showAllFolders, setShowAllFolders] = useState(false);
+
+  const FOLDER_LIMIT = 12;
+  const folders = showAllFolders ? folderTags : folderTags.slice(0, FOLDER_LIMIT);
 
   return (
     <>
@@ -113,6 +118,26 @@ export function TagRail() {
           <span className="tagcount">{count}</span>
         </div>
       ))}
+
+      {folderTags.length > 0 && <div className="sidebar-h">Folders</div>}
+      {folders.map(([name, count]) => (
+        <div
+          key={"f:" + name}
+          className={"tagrow folder" + (filter.tag === name ? " on" : "")}
+          title={`Every sound under a folder named ${name}`}
+          onClick={() => void setFilter({ ...filter, tag: filter.tag === name ? null : name })}
+        >
+          <span className="tagname">{name}</span>
+          <span className="tagcount">{count}</span>
+        </div>
+      ))}
+      {folderTags.length > FOLDER_LIMIT && (
+        <div className="tagrow more" onClick={() => setShowAllFolders(!showAllFolders)}>
+          <span className="dim">
+            {showAllFolders ? "show fewer" : `+${folderTags.length - FOLDER_LIMIT} more`}
+          </span>
+        </div>
+      )}
     </>
   );
 }

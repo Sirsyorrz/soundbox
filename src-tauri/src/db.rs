@@ -227,6 +227,11 @@ impl Db {
                 let rel: String = r.get(2)?;
                 let folder =
                     rel.rsplit_once(['/', '\\']).map(|(d, _)| d.to_string()).unwrap_or_default();
+                let folder_tags: Vec<String> = folder
+                    .split(['/', '\\'])
+                    .filter(|s| !s.is_empty() && *s != ".")
+                    .map(str::to_string)
+                    .collect();
                 Ok(crate::search::Item {
                     id: r.get(0)?,
                     filename: r.get(1)?,
@@ -241,6 +246,7 @@ impl Db {
                     last_played: r.get(10)?,
                     favorite: r.get(11)?,
                     tags: r.get::<_, String>(12)?.split_whitespace().map(str::to_string).collect(),
+                    folder_tags,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

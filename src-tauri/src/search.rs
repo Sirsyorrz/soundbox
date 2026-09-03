@@ -24,6 +24,9 @@ pub struct Item {
     pub last_played: i64,
     pub favorite: bool,
     pub tags: Vec<String>,
+    /// Each directory between the library root and the file, usable as a filter.
+    /// Derived from the path, never stored, so moving a file re-derives them.
+    pub folder_tags: Vec<String>,
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -41,7 +44,8 @@ impl Filter {
             return false;
         }
         match &self.tag {
-            Some(t) => i.tags.iter().any(|x| x == t),
+            // One rail lists both, so a filter click matches either kind.
+            Some(t) => i.tags.iter().any(|x| x == t) || i.folder_tags.iter().any(|x| x == t),
             None => true,
         }
     }
@@ -232,7 +236,21 @@ mod tests {
             last_played: 0,
             favorite: false,
             tags: Vec::new(),
+            folder_tags: folder.split('/').filter(|s| !s.is_empty()).map(str::to_string).collect(),
         }
+    }
+
+    #[test]
+    fn a_folder_name_filters_like_a_tag() {
+        let mut ix = index();
+        let mut f = |name: &str| {
+            let filter = Filter { favorites_only: false, tag: Some(name.to_string()) };
+            ix.search("", 999, Sort::Relevance, false, &filter).len()
+        };
+        // Nested folders each filter independently.
+        assert_eq!(f("Farts"), 2);
+        assert_eq!(f("SFX"), 3, "the parent covers everything beneath it");
+        assert_eq!(f("nope"), 0);
     }
 
     fn index() -> Index {

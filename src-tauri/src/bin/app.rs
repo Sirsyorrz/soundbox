@@ -329,6 +329,21 @@ fn tags(state: State<'_, App>) -> Result<Vec<(String, i64)>, String> {
     state.db.lock().unwrap().tag_counts().map_err(|e| e.to_string())
 }
 
+/// Derived from paths, so it comes from the index rather than the database.
+#[tauri::command]
+fn folder_tags(state: State<'_, App>) -> Vec<(String, i64)> {
+    let ix = state.index.lock().unwrap();
+    let mut counts: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
+    for item in ix.items() {
+        for f in &item.folder_tags {
+            *counts.entry(f.as_str()).or_default() += 1;
+        }
+    }
+    let mut out: Vec<(String, i64)> = counts.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    out
+}
+
 #[derive(Serialize)]
 struct RenameResult {
     filename: String,
@@ -649,6 +664,7 @@ fn main() {
             tag_file,
             untag_file,
             tags,
+            folder_tags,
             similar,
             sparklines,
             load,
