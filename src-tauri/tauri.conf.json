@@ -10,8 +10,22 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "windows": [{ "title": "SoundBox", "width": 1400, "height": 880 }],
-    "security": { "csp": null }
+    "windows": [
+      {
+        "title": "SoundBox",
+        "width": 1400,
+        "height": 880
+      }
+    ],
+    "security": {
+      "csp": null
+    }
   },
-  "bundle": { "active": true, "targets": ["appimage", "nsis"], "icon": ["icons/icon.png"] }
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
+    ]
+  }
 }

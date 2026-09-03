@@ -189,7 +189,9 @@ impl Index {
                 by(h.id).map(|i| i.filename.to_lowercase()).unwrap_or_default()
             }),
             Sort::Folder => hits.sort_by_cached_key(|h| {
-                by(h.id).map(|i| (i.folder.to_lowercase(), i.filename.to_lowercase())).unwrap_or_default()
+                by(h.id)
+                    .map(|i| (i.folder.to_lowercase(), i.filename.to_lowercase()))
+                    .unwrap_or_default()
             }),
             Sort::Added => hits.sort_by_cached_key(|h| by(h.id).map(|i| i.added_at).unwrap_or(0)),
             Sort::Modified => hits.sort_by_cached_key(|h| by(h.id).map(|i| i.mtime).unwrap_or(0)),

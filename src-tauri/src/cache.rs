@@ -209,7 +209,9 @@ mod tests {
 
     fn synth(channels: usize, frames: usize) -> Decoded {
         let samples = (0..frames * channels)
-            .map(|i| ((i / channels) as f32 * 0.01).sin() * if i % channels == 0 { 1.0 } else { 0.5 })
+            .map(|i| {
+                ((i / channels) as f32 * 0.01).sin() * if i % channels == 0 { 1.0 } else { 0.5 }
+            })
             .collect();
         Decoded { samples, channels, sample_rate: 48000 }
     }
@@ -265,9 +267,7 @@ mod tests {
     fn mono_downsample_sums_channels_and_hits_width() {
         // Silent left, loud right: taking channel 0 would look like silence.
         let frames = 8192;
-        let samples = (0..frames * 2)
-            .map(|i| if i % 2 == 0 { 0.0 } else { 0.8 })
-            .collect();
+        let samples = (0..frames * 2).map(|i| if i % 2 == 0 { 0.0 } else { 0.8 }).collect();
         let d = Decoded { samples, channels: 2, sample_rate: 48000 };
         let spark = build(&d).mono_downsample(50);
         assert_eq!(spark.len(), 50);

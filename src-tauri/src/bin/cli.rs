@@ -141,7 +141,10 @@ fn cmd_play(args: &[String]) -> Result<()> {
 
     let p = Player::spawn()?;
     let (rate, ch) = p.output_info().unwrap_or((0, 0));
-    println!("device {rate} Hz {ch} ch | file {} Hz {} ch | gain {gain:.3}", d.sample_rate, d.channels);
+    println!(
+        "device {rate} Hz {ch} ch | file {} Hz {} ch | gain {gain:.3}",
+        d.sample_rate, d.channels
+    );
 
     let frames = d.frames();
     p.send(Cmd::Load { audio: d.clone(), gain });
@@ -152,7 +155,9 @@ fn cmd_play(args: &[String]) -> Result<()> {
     for _ in 0..10 {
         std::thread::sleep(std::time::Duration::from_millis(60));
         println!("  pos={} playing={}", p.position(), p.is_playing());
-        if !p.is_playing() { break; }
+        if !p.is_playing() {
+            break;
+        }
     }
 
     println!("toggle pause/resume");
@@ -185,8 +190,13 @@ fn cmd_search(args: &[String]) -> Result<()> {
         println!("\n  \"{q}\" -> {} hits in {:?}", hits.len(), el);
         for h in hits.iter().take(5) {
             let it = ix.get(h.id).unwrap();
-            println!("     {:>6}  {}{}  [{}]", h.score, it.filename,
-                if h.via_folder { " (via folder)" } else { "" }, it.folder);
+            println!(
+                "     {:>6}  {}{}  [{}]",
+                h.score,
+                it.filename,
+                if h.via_folder { " (via folder)" } else { "" },
+                it.folder
+            );
         }
     }
     Ok(())
@@ -210,16 +220,25 @@ fn cmd_similar(args: &[String]) -> Result<()> {
         return Ok(());
     };
     let seed_item = ix.get(seed.id).unwrap().clone();
-    println!("\nseed: {} [{}] {:.2}s",
-        seed_item.filename, seed_item.folder, seed_item.duration_ms as f64 / 1000.0);
+    println!(
+        "\nseed: {} [{}] {:.2}s",
+        seed_item.filename,
+        seed_item.folder,
+        seed_item.duration_ms as f64 / 1000.0
+    );
 
     let t = std::time::Instant::now();
     let ns = sim.query(seed.id, 8, DEFAULT_DURATION_RATIO);
     println!("query in {:?}\n", t.elapsed());
     for n in ns {
         if let Some(i) = ix.get(n.id) {
-            println!("  {:.4}  {:<52} [{}] {:.2}s",
-                n.score, i.filename, i.folder, i.duration_ms as f64 / 1000.0);
+            println!(
+                "  {:.4}  {:<52} [{}] {:.2}s",
+                n.score,
+                i.filename,
+                i.folder,
+                i.duration_ms as f64 / 1000.0
+            );
         }
     }
     Ok(())

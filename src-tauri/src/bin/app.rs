@@ -79,10 +79,7 @@ struct StatusDto {
 fn reload_index(app: &App) -> Result<usize, String> {
     let (items, feats) = {
         let db = app.db.lock().unwrap();
-        (
-            db.all_items().map_err(|e| e.to_string())?,
-            db.all_features().map_err(|e| e.to_string())?,
-        )
+        (db.all_items().map_err(|e| e.to_string())?, db.all_features().map_err(|e| e.to_string())?)
     };
     let n = items.len();
     *app.index.lock().unwrap() = Index::new(items);
@@ -343,18 +340,15 @@ async fn load(state: State<'_, App>, id: i64, normalise: bool) -> Result<LoadedD
         info
     };
 
-    let decoded = Arc::new(audio::decode_file(std::path::Path::new(&path)).map_err(|e| e.to_string())?);
+    let decoded =
+        Arc::new(audio::decode_file(std::path::Path::new(&path)).map_err(|e| e.to_string())?);
 
     // The cached level is a coarse 2048 samples/bucket, which is far too blocky
     // for a short sound. The file is already decoded here, so build detail peaks
     // at display resolution instead.
     let peaks = cache::build_n(&decoded, DETAIL_BUCKETS).to_f32();
 
-    let gain = if normalise {
-        normalise_gain(lufs, -18.0, peak_db.unwrap_or(-1.0))
-    } else {
-        1.0
-    };
+    let gain = if normalise { normalise_gain(lufs, -18.0, peak_db.unwrap_or(-1.0)) } else { 1.0 };
 
     let dto = LoadedDto {
         id,

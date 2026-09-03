@@ -25,6 +25,12 @@ pub struct FileRow {
     pub status: String,
 }
 
+/// (log id, file id, old rel_path, new rel_path, root path)
+pub type RenameEntry = (i64, i64, String, String, String);
+
+/// (id, content_key, duration_ms, feature blob)
+pub type FeatureRow = (i64, String, u64, Vec<u8>);
+
 impl Db {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(p) = path.parent() {
@@ -139,7 +145,13 @@ impl Db {
             .query_row(
                 "SELECT size, mtime, peaks_rev FROM files WHERE root_id = ?1 AND rel_path = ?2",
                 params![root_id, rel_path],
-                |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)?, r.get::<_, i64>(2)? as u16)),
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)? as u64,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)? as u16,
+                    ))
+                },
             )
             .optional()?;
         Ok(r)
@@ -200,7 +212,8 @@ impl Db {
         let rows = st
             .query_map([], |r| {
                 let rel: String = r.get(2)?;
-                let folder = rel.rsplit_once(['/', '\\']).map(|(d, _)| d.to_string()).unwrap_or_default();
+                let folder =
+                    rel.rsplit_once(['/', '\\']).map(|(d, _)| d.to_string()).unwrap_or_default();
                 Ok(crate::search::Item {
                     id: r.get(0)?,
                     filename: r.get(1)?,
@@ -214,11 +227,7 @@ impl Db {
                     mtime: r.get(9)?,
                     last_played: r.get(10)?,
                     favorite: r.get(11)?,
-                    tags: r
-                        .get::<_, String>(12)?
-                        .split_whitespace()
-                        .map(str::to_string)
-                        .collect(),
+                    tags: r.get::<_, String>(12)?.split_whitespace().map(str::to_string).collect(),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -276,8 +285,11 @@ impl Db {
     }
 
     pub fn toggle_favorite(&self, id: i64) -> Result<bool> {
-        let key: String =
-            self.conn.query_row("SELECT content_key FROM files WHERE id = ?1", params![id], |r| r.get(0))?;
+        let key: String = self.conn.query_row(
+            "SELECT content_key FROM files WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )?;
         let is_fav: bool = self
             .conn
             .query_row("SELECT 1 FROM favorites WHERE content_key = ?1", params![key], |_| Ok(true))
@@ -301,11 +313,15 @@ impl Db {
         if tag.is_empty() {
             return Ok(());
         }
-        let key: String =
-            self.conn.query_row("SELECT content_key FROM files WHERE id = ?1", params![id], |r| r.get(0))?;
+        let key: String = self.conn.query_row(
+            "SELECT content_key FROM files WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )?;
         self.conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", params![tag])?;
         let tag_id: i64 =
-            self.conn.query_row("SELECT id FROM tags WHERE name = ?1", params![tag], |r| r.get(0))?;
+            self.conn
+                .query_row("SELECT id FROM tags WHERE name = ?1", params![tag], |r| r.get(0))?;
         self.conn.execute(
             "INSERT OR IGNORE INTO file_tags (content_key, tag_id) VALUES (?1, ?2)",
             params![key, tag_id],
@@ -315,8 +331,11 @@ impl Db {
 
     pub fn untag_file(&self, id: i64, tag: &str) -> Result<()> {
         let tag = tag.trim().to_lowercase();
-        let key: String =
-            self.conn.query_row("SELECT content_key FROM files WHERE id = ?1", params![id], |r| r.get(0))?;
+        let key: String = self.conn.query_row(
+            "SELECT content_key FROM files WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )?;
         self.conn.execute(
             "DELETE FROM file_tags WHERE content_key = ?1
              AND tag_id = (SELECT id FROM tags WHERE name = ?2)",
@@ -332,7 +351,8 @@ impl Db {
              LEFT JOIN file_tags ft ON ft.tag_id = t.id
              GROUP BY t.id ORDER BY c DESC, t.name",
         )?;
-        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+        let rows =
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 
@@ -352,7 +372,7 @@ impl Db {
     }
 
     /// Most recent rename: (log id, file id, old rel_path, new rel_path, root path).
-    pub fn last_rename(&self) -> Result<Option<(i64, i64, String, String, String)>> {
+    pub fn last_rename(&self) -> Result<Option<RenameEntry>> {
         let r = self
             .conn
             .query_row(
@@ -374,15 +394,13 @@ impl Db {
     }
 
     /// (id, content_key, duration_ms, feature blob) for the similarity index.
-    pub fn all_features(&self) -> Result<Vec<(i64, String, u64, Vec<u8>)>> {
+    pub fn all_features(&self) -> Result<Vec<FeatureRow>> {
         let mut st = self.conn.prepare(
             "SELECT id, content_key, duration_ms, features FROM files
              WHERE status = 'ok' AND features IS NOT NULL AND LENGTH(features) > 0",
         )?;
         let rows = st
-            .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u64, r.get(3)?))
-            })?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u64, r.get(3)?)))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -393,7 +411,9 @@ impl Db {
 
     /// Distinct audio content, as opposed to files on disk.
     pub fn count_unique_content(&self) -> Result<i64> {
-        Ok(self.conn.query_row("SELECT COUNT(DISTINCT content_key) FROM files", [], |r| r.get(0))?)
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(DISTINCT content_key) FROM files", [], |r| r.get(0))?)
     }
 
     pub fn count_status(&self, status: &str) -> Result<i64> {

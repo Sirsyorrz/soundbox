@@ -1,5 +1,5 @@
-use std::path::Path;
 use anyhow::{anyhow, Result};
+use std::path::Path;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::FormatOptions;
@@ -16,12 +16,9 @@ pub struct Decoded {
 
 impl Decoded {
     pub fn frames(&self) -> usize {
-        if self.channels == 0 {
-            0
-        } else {
-            self.samples.len() / self.channels
-        }
+        self.samples.len().checked_div(self.channels).unwrap_or(0)
     }
+
     pub fn duration_ms(&self) -> u64 {
         if self.sample_rate == 0 {
             0
@@ -87,9 +84,8 @@ pub fn decode_file(path: &Path) -> Result<Decoded> {
                 if channels == 0 {
                     channels = spec.channels.count();
                 }
-                let b = buf.get_or_insert_with(|| {
-                    SampleBuffer::<f32>::new(audio.capacity() as u64, spec)
-                });
+                let b = buf
+                    .get_or_insert_with(|| SampleBuffer::<f32>::new(audio.capacity() as u64, spec));
                 b.copy_interleaved_ref(audio);
                 samples.extend_from_slice(b.samples());
             }

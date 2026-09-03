@@ -165,7 +165,8 @@ fn build_stream(pos: Arc<AtomicU64>, playing: Arc<AtomicBool>) -> Result<Built> 
                     .clamp(0.0, 1.0) as f32;
                 let g = s.gain * s.volume * fade;
                 for c in 0..channels {
-                    let v = audio.samples.get(i * src_ch + c.min(src_ch - 1)).copied().unwrap_or(0.0);
+                    let v =
+                        audio.samples.get(i * src_ch + c.min(src_ch - 1)).copied().unwrap_or(0.0);
                     out[f * channels + c] = v * g;
                 }
                 s.pos += s.step;

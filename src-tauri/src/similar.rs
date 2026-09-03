@@ -31,11 +31,7 @@ pub struct Neighbour {
 
 impl SimilarIndex {
     pub fn build(rows: Vec<(i64, String, u64, Vec<u8>)>) -> Self {
-        let dim = rows
-            .iter()
-            .map(|(_, _, _, b)| b.len() / 4)
-            .find(|d| *d > 0)
-            .unwrap_or(0);
+        let dim = rows.iter().map(|(_, _, _, b)| b.len() / 4).find(|d| *d > 0).unwrap_or(0);
 
         let mut entries = Vec::with_capacity(rows.len());
         let mut vecs: Vec<f32> = Vec::with_capacity(rows.len() * dim);
@@ -121,7 +117,8 @@ impl SimilarIndex {
                 continue;
             }
             if duration_ratio > 0.0 {
-                let ratio = (e.duration_ms.max(1) as f64 / t_dur).max(t_dur / e.duration_ms.max(1) as f64);
+                let ratio =
+                    (e.duration_ms.max(1) as f64 / t_dur).max(t_dur / e.duration_ms.max(1) as f64);
                 if ratio > duration_ratio {
                     continue;
                 }
@@ -131,7 +128,9 @@ impl SimilarIndex {
             out.push(Neighbour { id: e.id, score });
         }
 
-        out.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        out.sort_unstable_by(|a, b| {
+            b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+        });
         out.truncate(limit);
         out
     }

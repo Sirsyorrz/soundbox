@@ -8,8 +8,7 @@ use walkdir::WalkDir;
 use crate::db::{Db, FileRow};
 use crate::{analysis, audio, cache, ident};
 
-pub const AUDIO_EXTS: &[&str] =
-    &["wav", "flac", "mp3", "ogg", "oga", "opus", "m4a", "aac", "alac"];
+pub const AUDIO_EXTS: &[&str] = &["wav", "flac", "mp3", "ogg", "oga", "opus", "m4a", "aac", "alac"];
 
 #[derive(Debug, Default, Clone)]
 pub struct ScanStats {
@@ -76,11 +75,7 @@ fn analyse(
 
     let rel_path = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
     let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-    let ext = path
-        .extension()
-        .and_then(|x| x.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let ext = path.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
     let content_key = ident::content_key(path)?;
 
     let mut row = FileRow {
