@@ -3421,6 +3421,7 @@ dependencies = [
  "cpal",
  "dirs",
  "ebur128",
+ "flate2",
  "nucleo-matcher",
  "rayon",
  "rusqlite",

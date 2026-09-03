@@ -6,9 +6,10 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use soundbox::db::Db;
 use soundbox::player::{normalise_gain, Cmd, Player};
+use soundbox::profiles::{self, Registry};
 use soundbox::search::{Filter, Hit, Index, Sort};
 use soundbox::similar::{SimilarIndex, DEFAULT_DURATION_RATIO};
-use soundbox::{audio, cache, rename, scan};
+use soundbox::{audio, cache, pack, rename, scan};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -19,6 +20,7 @@ struct App {
     player: Option<Player>,
     current: Mutex<Option<CurrentFile>>,
     base: PathBuf,
+    reg: Mutex<Registry>,
 }
 
 struct CurrentFile {
@@ -91,6 +93,38 @@ fn reload_index(app: &App) -> Result<usize, String> {
 async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
     let (tx, rx) = std::sync::mpsc::channel();
     app.dialog().file().pick_folder(move |p| {
+        let _ = tx.send(p);
+    });
+    tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .ok()
+        .flatten()
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn save_pack_dialog(app: tauri::AppHandle) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .add_filter("SoundBox pack", &[pack::EXT])
+        .set_file_name("library.sbpack")
+        .save_file(move |p| {
+            let _ = tx.send(p);
+        });
+    tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .ok()
+        .flatten()
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn open_pack_dialog(app: tauri::AppHandle) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog().file().add_filter("SoundBox pack", &[pack::EXT]).pick_file(move |p| {
         let _ = tx.send(p);
     });
     tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
@@ -327,6 +361,101 @@ async fn undo_rename(state: State<'_, App>) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+fn profiles_list(state: State<'_, App>) -> Registry {
+    state.reg.lock().unwrap().clone()
+}
+
+/// Swaps the open database and rebuilds the in-memory indexes.
+fn open_profile(state: &State<'_, App>, id: &str) -> Result<usize, String> {
+    let path = profiles::db_path(&state.base, id);
+    let db = Db::open(&path).map_err(|e| e.to_string())?;
+    *state.db.lock().unwrap() = db;
+    // Selection belongs to the profile that was open, not this one.
+    *state.current.lock().unwrap() = None;
+    reload_index(state)
+}
+
+#[tauri::command]
+async fn profile_switch(state: State<'_, App>, id: String) -> Result<usize, String> {
+    {
+        let mut reg = state.reg.lock().unwrap();
+        reg.switch(&state.base, &id).map_err(|e| e.to_string())?;
+    }
+    open_profile(&state, &id)
+}
+
+#[tauri::command]
+async fn profile_create(state: State<'_, App>, name: String) -> Result<Registry, String> {
+    let mut reg = state.reg.lock().unwrap();
+    reg.create(&state.base, &name).map_err(|e| e.to_string())?;
+    Ok(reg.clone())
+}
+
+#[tauri::command]
+async fn profile_rename(
+    state: State<'_, App>,
+    id: String,
+    name: String,
+) -> Result<Registry, String> {
+    let mut reg = state.reg.lock().unwrap();
+    reg.rename(&state.base, &id, &name).map_err(|e| e.to_string())?;
+    Ok(reg.clone())
+}
+
+#[tauri::command]
+async fn profile_delete(state: State<'_, App>, id: String) -> Result<Registry, String> {
+    let active = {
+        let mut reg = state.reg.lock().unwrap();
+        reg.delete(&state.base, &id).map_err(|e| e.to_string())?
+    };
+    open_profile(&state, &active)?;
+    Ok(state.reg.lock().unwrap().clone())
+}
+
+/// Packs travel with the sounds, so adding a root offers whatever it contains.
+#[tauri::command]
+fn pack_in_root(path: String) -> Option<String> {
+    pack::find_in_root(std::path::Path::new(&path)).map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn pack_export(state: State<'_, App>, path: String) -> Result<usize, String> {
+    let name =
+        state.reg.lock().unwrap().active_profile().map(|p| p.name.clone()).unwrap_or_default();
+    let p = {
+        let db = state.db.lock().unwrap();
+        pack::export(&db, &name).map_err(|e| e.to_string())?
+    };
+    let n = p.entries.len();
+    pack::write(&p, std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+    Ok(n)
+}
+
+#[tauri::command]
+async fn pack_preview(state: State<'_, App>, path: String) -> Result<pack::Preview, String> {
+    let p = pack::read(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+    let db = state.db.lock().unwrap();
+    pack::preview(&db, &p).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn pack_import(
+    state: State<'_, App>,
+    path: String,
+    overwrite: bool,
+    include_fuzzy: bool,
+) -> Result<pack::Preview, String> {
+    let p = pack::read(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+    let mode = if overwrite { pack::Mode::Overwrite } else { pack::Mode::Merge };
+    let applied = {
+        let db = state.db.lock().unwrap();
+        pack::import(&db, &p, mode, include_fuzzy).map_err(|e| e.to_string())?
+    };
+    reload_index(&state)?;
+    Ok(applied)
+}
+
+#[tauri::command]
 fn file_path(state: State<'_, App>, id: i64) -> Result<String, String> {
     state.db.lock().unwrap().path_for(id).map_err(|e| e.to_string())
 }
@@ -466,7 +595,8 @@ fn main() {
         .plugin(tauri_plugin_drag::init())
         .setup(|app| {
             let base = base_dir();
-            let db = Db::open(&base.join("library.db"))?;
+            let reg = profiles::init(&base)?;
+            let db = Db::open(&profiles::db_path(&base, &reg.active))?;
             let items = db.all_items().unwrap_or_default();
             let feats = db.all_features().unwrap_or_default();
             let player = match Player::spawn() {
@@ -483,16 +613,28 @@ fn main() {
                 player,
                 current: Mutex::new(None),
                 base,
+                reg: Mutex::new(reg),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             pick_folder,
+            save_pack_dialog,
+            open_pack_dialog,
             add_root,
             roots,
             library_size,
             search,
             file_path,
+            profiles_list,
+            profile_switch,
+            profile_create,
+            profile_rename,
+            profile_delete,
+            pack_in_root,
+            pack_export,
+            pack_preview,
+            pack_import,
             rename_file,
             undo_rename,
             toggle_favorite,

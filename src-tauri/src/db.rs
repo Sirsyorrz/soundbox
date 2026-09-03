@@ -25,6 +25,19 @@ pub struct FileRow {
     pub status: String,
 }
 
+/// One sound's user-authored metadata, as it travels in a pack.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PackEntry {
+    pub content_key: String,
+    pub filename: String,
+    pub size: u64,
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub favorite: bool,
+}
+
 /// (log id, file id, old rel_path, new rel_path, root path)
 pub type RenameEntry = (i64, i64, String, String, String);
 
@@ -403,6 +416,112 @@ impl Db {
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u64, r.get(3)?)))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    /// User-authored metadata only, one row per distinct content_key.
+    pub fn export_entries(&self) -> Result<Vec<PackEntry>> {
+        let mut st = self.conn.prepare(
+            "SELECT f.content_key, MIN(f.filename), MIN(f.size), MIN(f.duration_ms),
+                    COALESCE((SELECT GROUP_CONCAT(t.name, char(31)) FROM file_tags ft
+                              JOIN tags t ON t.id = ft.tag_id
+                              WHERE ft.content_key = f.content_key), ''),
+                    EXISTS(SELECT 1 FROM favorites fa WHERE fa.content_key = f.content_key)
+             FROM files f
+             GROUP BY f.content_key
+             HAVING length((SELECT GROUP_CONCAT(t.name) FROM file_tags ft
+                            JOIN tags t ON t.id = ft.tag_id
+                            WHERE ft.content_key = f.content_key)) > 0
+                 OR EXISTS(SELECT 1 FROM favorites fa WHERE fa.content_key = f.content_key)",
+        )?;
+        let rows = st
+            .query_map([], |r| {
+                let tags: String = r.get(4)?;
+                Ok(PackEntry {
+                    content_key: r.get(0)?,
+                    filename: r.get(1)?,
+                    size: r.get::<_, i64>(2)? as u64,
+                    duration_ms: r.get::<_, i64>(3)? as u64,
+                    tags: tags
+                        .split('\u{1f}')
+                        .filter(|t| !t.is_empty())
+                        .map(str::to_string)
+                        .collect(),
+                    favorite: r.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Tag names with colours, for round-tripping tag appearance.
+    pub fn tag_colors(&self) -> Result<Vec<(String, Option<String>)>> {
+        let mut st = self.conn.prepare("SELECT name, color FROM tags ORDER BY name")?;
+        let rows =
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// content_key -> (filename, size) for every indexed file, for pack matching.
+    pub fn content_fingerprints(&self) -> Result<Vec<(String, String, u64)>> {
+        let mut st = self.conn.prepare("SELECT content_key, filename, size FROM files")?;
+        let rows = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u64)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Applies pack metadata directly by content_key, bypassing file ids.
+    pub fn apply_pack_entry(
+        &self,
+        content_key: &str,
+        tags: &[String],
+        favorite: bool,
+        overwrite: bool,
+    ) -> Result<()> {
+        if overwrite {
+            self.conn
+                .execute("DELETE FROM file_tags WHERE content_key = ?1", params![content_key])?;
+            self.conn
+                .execute("DELETE FROM favorites WHERE content_key = ?1", params![content_key])?;
+        }
+        for tag in tags {
+            self.conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", params![tag])?;
+            let tag_id: i64 =
+                self.conn
+                    .query_row("SELECT id FROM tags WHERE name = ?1", params![tag], |r| r.get(0))?;
+            self.conn.execute(
+                "INSERT OR IGNORE INTO file_tags (content_key, tag_id) VALUES (?1, ?2)",
+                params![content_key, tag_id],
+            )?;
+        }
+        // Merge never clears a local favourite; overwrite already cleared it.
+        if favorite {
+            self.conn.execute(
+                "INSERT OR IGNORE INTO favorites (content_key, added_at) VALUES (?1, ?2)",
+                params![content_key, now()],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn set_tag_color(&self, name: &str, color: &str) -> Result<()> {
+        self.conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", params![name])?;
+        self.conn.execute("UPDATE tags SET color = ?2 WHERE name = ?1", params![name, color])?;
+        Ok(())
+    }
+
+    pub fn transaction<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        self.conn.execute_batch("BEGIN")?;
+        match f() {
+            Ok(v) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
     }
 
     pub fn count(&self) -> Result<i64> {

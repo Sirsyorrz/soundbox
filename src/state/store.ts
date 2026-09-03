@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import type { Filter, Hit, Item, Loaded, Root, Sort } from "../types";
+import type { Filter, Hit, Item, Loaded, PackPreview, Registry, Root, Sort } from "../types";
 import { clearSparks } from "../panels/Sparkline";
 import type { LayoutName } from "../layout";
 
@@ -69,6 +69,14 @@ interface State {
   rescanRoot: (id: number) => Promise<void>;
   setLayout: (l: LayoutName) => void;
   addFolder: () => Promise<void>;
+  registry: Registry | null;
+  loadProfiles: () => Promise<void>;
+  switchProfile: (id: string) => Promise<void>;
+  createProfile: (name: string) => Promise<void>;
+  renameProfile: (id: string, name: string) => Promise<void>;
+  deleteProfile: (id: string) => Promise<void>;
+  exportPack: () => Promise<void>;
+  importPack: (path?: string) => Promise<void>;
   tick: () => Promise<void>;
   say: (m: string) => void;
 }
@@ -85,6 +93,7 @@ export const useStore = create<State>((set, get) => ({
   looping: false,
   normalise: true,
   volume: 1,
+  registry: null,
   sort: "relevance",
   desc: false,
   rowH: 26,
@@ -351,10 +360,102 @@ export const useStore = create<State>((set, get) => ({
       set({ message: `indexed ${n} files` });
       await get().loadRoots();
       await get().refresh();
+      // A pack shipped with the sounds is the whole point of packs.
+      const found = await invoke<string | null>("pack_in_root", { path: dir });
+      if (found && confirm(`This folder ships tags in ${found.split(/[/\\]/).pop()}.\n\nImport them?`)) {
+        await get().importPack(found);
+      }
     } catch (e) {
       set({ message: `scan failed: ${e}` });
     } finally {
       set({ scanning: null });
+    }
+  },
+
+  loadProfiles: async () => {
+    set({ registry: await invoke<Registry>("profiles_list") });
+  },
+
+  switchProfile: async (id) => {
+    const n = await invoke<number>("profile_switch", { id });
+    await get().loadProfiles();
+    await get().loadRoots();
+    await get().loadTags();
+    clearSparks();
+    set({ query: "", selected: -1, current: null, message: `${n} sounds` });
+    await get().refresh();
+  },
+
+  createProfile: async (name) => {
+    try {
+      const reg = await invoke<Registry>("profile_create", { name });
+      set({ registry: reg });
+      const made = reg.profiles.find((p) => p.name === name.trim());
+      if (made) await get().switchProfile(made.id);
+    } catch (e) {
+      set({ message: `${e}` });
+    }
+  },
+
+  renameProfile: async (id, name) => {
+    try {
+      set({ registry: await invoke<Registry>("profile_rename", { id, name }) });
+    } catch (e) {
+      set({ message: `${e}` });
+    }
+  },
+
+  deleteProfile: async (id) => {
+    try {
+      set({ registry: await invoke<Registry>("profile_delete", { id }) });
+      await get().loadRoots();
+      await get().loadTags();
+      clearSparks();
+      set({ selected: -1, current: null });
+      await get().refresh();
+    } catch (e) {
+      set({ message: `${e}` });
+    }
+  },
+
+  exportPack: async () => {
+    const path = await invoke<string | null>("save_pack_dialog");
+    if (!path) return;
+    try {
+      const n = await invoke<number>("pack_export", { path });
+      set({ message: `exported ${n} tagged sounds` });
+    } catch (e) {
+      set({ message: `export failed: ${e}` });
+    }
+  },
+
+  importPack: async (path) => {
+    const file = path ?? (await invoke<string | null>("open_pack_dialog"));
+    if (!file) return;
+    try {
+      const p = await invoke<PackPreview>("pack_preview", { path: file });
+      const lines = [
+        `${p.exact} matched exactly`,
+        p.fuzzy ? `${p.fuzzy} matched by name and size only` : "",
+        p.missing ? `${p.missing} not in this library` : "",
+      ].filter(Boolean);
+      const useFuzzy =
+        p.fuzzy > 0 &&
+        confirm(
+          `${lines.join("\n")}\n\nInclude the ${p.fuzzy} uncertain matches?\n` +
+            `These share a name and size but not contents, so they may be re-encodes.`,
+        );
+      if (!confirm(`Import tags for ${p.exact + (useFuzzy ? p.fuzzy : 0)} sounds?`)) return;
+      const applied = await invoke<PackPreview>("pack_import", {
+        path: file,
+        overwrite: false,
+        includeFuzzy: useFuzzy,
+      });
+      set({ message: `imported ${applied.exact + applied.fuzzy} sounds` });
+      await get().loadTags();
+      await get().refresh();
+    } catch (e) {
+      set({ message: `import failed: ${e}` });
     }
   },
 

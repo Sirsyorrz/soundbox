@@ -457,3 +457,30 @@ body.row-resize,
 body.row-resize * {
   cursor: row-resize !important;
 }
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-2);
+}
+.profile-row select {
+  flex: 1;
+  min-width: 0;
+}
+.profile-row .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.profile-actions {
+  display: flex;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+}
+.profile-actions button {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}

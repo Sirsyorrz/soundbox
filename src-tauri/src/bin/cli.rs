@@ -2,10 +2,16 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{bail, Result};
-use soundbox::{analysis, audio, cache, db::Db, ident, scan};
+use soundbox::{analysis, audio, cache, db::Db, ident, pack, scan};
 
 /// `SOUNDBOX_DATA` overrides the library location, so a scratch index can be
 /// built without disturbing the real one.
+/// The active profile's database, so the CLI and the app always agree.
+fn active_db(base: &std::path::Path) -> anyhow::Result<PathBuf> {
+    let reg = soundbox::profiles::init(base)?;
+    Ok(soundbox::profiles::db_path(base, &reg.active))
+}
+
 fn data_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("SOUNDBOX_DATA") {
         return PathBuf::from(d);
@@ -25,6 +31,8 @@ fn main() -> Result<()> {
         Some("play") => cmd_play(&args[1..]),
         Some("search") => cmd_search(&args[1..]),
         Some("similar") => cmd_similar(&args[1..]),
+        Some("pack-export") => cmd_pack_export(&args[1..]),
+        Some("pack-import") => cmd_pack_import(&args[1..]),
         _ => {
             eprintln!("usage:");
             eprintln!("  soundbox-cli scan <dir>     index a folder");
@@ -32,6 +40,8 @@ fn main() -> Result<()> {
             eprintln!("  soundbox-cli stats          summarise the index");
             eprintln!("  soundbox-cli play <file>    audition through the audio thread");
             eprintln!("  soundbox-cli similar <query>  nearest neighbours of the first match");
+            eprintln!("  soundbox-cli pack-export <out.sbpack>       write tags + favourites");
+            eprintln!("  soundbox-cli pack-import <in.sbpack> [--overwrite] [--fuzzy]");
             Ok(())
         }
     }
@@ -43,7 +53,7 @@ fn cmd_scan(dir: &Path) -> Result<()> {
     }
     let dir = dir.canonicalize()?;
     let base = data_dir();
-    let db = Db::open(&base.join("library.db"))?;
+    let db = Db::open(&active_db(&base)?)?;
     let root_id = db.add_root(&dir, &dir.file_name().unwrap_or_default().to_string_lossy())?;
 
     println!("scanning {}", dir.display());
@@ -70,7 +80,7 @@ fn cmd_scan(dir: &Path) -> Result<()> {
     if stats.analysed > 0 {
         println!("  {:.1} ms/file", stats.elapsed_ms as f64 / stats.analysed as f64);
     }
-    println!("db: {}", base.join("library.db").display());
+    println!("db: {}", active_db(&base)?.display());
     Ok(())
 }
 
@@ -108,7 +118,7 @@ fn cmd_probe(paths: &[String]) -> Result<()> {
 
 fn cmd_stats() -> Result<()> {
     let base = data_dir();
-    let db = Db::open(&base.join("library.db"))?;
+    let db = Db::open(&active_db(&base)?)?;
     println!("roots:");
     for (id, path, label) in db.roots()? {
         println!("  [{id}] {label}  {path}");
@@ -175,7 +185,7 @@ fn cmd_play(args: &[String]) -> Result<()> {
 }
 
 fn cmd_search(args: &[String]) -> Result<()> {
-    let db = Db::open(&data_dir().join("library.db"))?;
+    let db = Db::open(&active_db(&data_dir())?)?;
     let t = std::time::Instant::now();
     let items = db.all_items()?;
     let n = items.len();
@@ -206,7 +216,7 @@ fn cmd_similar(args: &[String]) -> Result<()> {
     use soundbox::search::{Index, Sort};
     use soundbox::similar::{SimilarIndex, DEFAULT_DURATION_RATIO};
 
-    let db = Db::open(&data_dir().join("library.db"))?;
+    let db = Db::open(&active_db(&data_dir())?)?;
     let mut ix = Index::new(db.all_items()?);
 
     let t = std::time::Instant::now();
@@ -241,5 +251,40 @@ fn cmd_similar(args: &[String]) -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+fn cmd_pack_export(args: &[String]) -> Result<()> {
+    let Some(out) = args.first() else { bail!("usage: pack-export <out.sbpack>") };
+    let base = data_dir();
+    let reg = soundbox::profiles::init(&base)?;
+    let name = reg.active_profile().map(|p| p.name.clone()).unwrap_or_default();
+    let db = Db::open(&active_db(&base)?)?;
+
+    let p = pack::export(&db, &name)?;
+    pack::write(&p, Path::new(out))?;
+    let bytes = std::fs::metadata(out)?.len();
+    println!("exported {} sounds from profile {name} ({bytes} bytes)", p.entries.len());
+    Ok(())
+}
+
+fn cmd_pack_import(args: &[String]) -> Result<()> {
+    let Some(input) = args.first() else { bail!("usage: pack-import <in.sbpack>") };
+    let overwrite = args.iter().any(|a| a == "--overwrite");
+    let fuzzy = args.iter().any(|a| a == "--fuzzy");
+
+    let db = Db::open(&active_db(&data_dir())?)?;
+    let p = pack::read(Path::new(input))?;
+
+    let pre = pack::preview(&db, &p)?;
+    println!("pack from {}: {} entries", p.profile, pre.total);
+    println!("  {} exact, {} by name+size, {} not here", pre.exact, pre.fuzzy, pre.missing);
+    for m in &pre.sample_missing {
+        println!("    missing: {m}");
+    }
+
+    let mode = if overwrite { pack::Mode::Overwrite } else { pack::Mode::Merge };
+    let applied = pack::import(&db, &p, mode, fuzzy)?;
+    println!("applied to {} sounds", applied.exact + applied.fuzzy);
     Ok(())
 }

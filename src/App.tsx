@@ -135,6 +135,7 @@ function Sidebar() {
 
   return (
     <div className="sidebar">
+      <Profiles />
       <div className="sidebar-h">Library</div>
       <div className="stat">
         <b>{librarySize.toLocaleString()}</b> sounds
@@ -176,6 +177,76 @@ function Sidebar() {
   );
 }
 
+function Profiles() {
+  const reg = useStore((s) => s.registry);
+  const s = useStore.getState();
+  if (!reg) return null;
+  const active = reg.profiles.find((p) => p.id === reg.active);
+
+  return (
+    <>
+      <div className="sidebar-h">Profile</div>
+      <div className="profile-row">
+        <span className="dot" style={{ background: active?.color ?? "#888" }} />
+        <select
+          value={reg.active}
+          onChange={(e) => void s.switchProfile(e.target.value)}
+          title="Each profile is a separate library with its own folders and tags"
+        >
+          {reg.profiles.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="profile-actions">
+        <button
+          title="Create a new, empty library"
+          onClick={() => {
+            const name = prompt("Name for the new profile?");
+            if (name) void s.createProfile(name);
+          }}
+        >
+          New
+        </button>
+        <button
+          title="Rename this profile"
+          onClick={() => {
+            const name = prompt("Rename profile", active?.name ?? "");
+            if (name && active) void s.renameProfile(active.id, name);
+          }}
+        >
+          Rename
+        </button>
+        <button
+          title="Delete this profile. No audio files are removed."
+          disabled={reg.profiles.length < 2}
+          onClick={() => {
+            if (!active) return;
+            if (
+              confirm(
+                `Delete profile "${active.name}"?\n\nIts folders and tags are forgotten.\nNo audio files are deleted.`,
+              )
+            )
+              void s.deleteProfile(active.id);
+          }}
+        >
+          Delete
+        </button>
+      </div>
+      <div className="profile-actions">
+        <button title="Save this profile's tags and favourites to a file" onClick={() => void s.exportPack()}>
+          Export tags
+        </button>
+        <button title="Apply tags and favourites from a pack file" onClick={() => void s.importPack()}>
+          Import
+        </button>
+      </div>
+    </>
+  );
+}
+
 function Status() {
   const message = useStore((s) => s.message);
   const device = useStore((s) => s.device);
@@ -196,6 +267,7 @@ export default function App() {
   useEffect(() => {
     void useStore.getState().refresh();
     void useStore.getState().loadRoots();
+    void useStore.getState().loadProfiles();
     void useStore.getState().loadTags();
     void invoke<string>("device_info").then((device) => useStore.setState({ device }));
 

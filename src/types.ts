@@ -50,3 +50,23 @@ export interface Loaded {
   peaks: [number, number][][];
   lufs: number | null;
 }
+
+export interface Profile {
+  id: string;
+  name: string;
+  color: string;
+  last_opened: number;
+}
+
+export interface Registry {
+  profiles: Profile[];
+  active: string;
+}
+
+export interface PackPreview {
+  total: number;
+  exact: number;
+  fuzzy: number;
+  missing: number;
+  sample_missing: string[];
+}
