@@ -6,7 +6,7 @@ import { layoutStyle } from "./layout";
 import { Waveform } from "./panels/Waveform";
 import { List } from "./panels/List";
 import { Similar } from "./panels/Similar";
-import { TagEditor, TagRail } from "./panels/Tags";
+import { RenameBox, TagEditor, TagRail } from "./panels/Tags";
 import "./app.css";
 
 function Search() {
@@ -117,6 +117,7 @@ function Detail() {
           <span className="dim">select a sound</span>
         )}
       </div>
+      <RenameBox />
       <TagEditor />
       <Waveform />
     </div>
@@ -234,6 +235,14 @@ export default function App() {
       if (e.code === "Enter" && s.region) s.playRegion(s.region);
       const item = s.currentItem();
       if (e.code === "KeyF" && item) void s.toggleFavorite(item.id);
+      if (e.code === "F2" && item) {
+        e.preventDefault();
+        s.beginRename();
+      }
+      if (e.code === "KeyZ" && e.ctrlKey) {
+        e.preventDefault();
+        void s.undoRename();
+      }
       if (e.code === "KeyT" && item) {
         e.preventDefault();
         document.getElementById("tag-input")?.focus();

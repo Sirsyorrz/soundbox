@@ -235,6 +235,16 @@ impl Db {
         Ok(std::path::Path::new(&root).join(rel).to_string_lossy().to_string())
     }
 
+    /// (rel_path, root path)
+    pub fn location(&self, id: i64) -> Result<(String, String)> {
+        Ok(self.conn.query_row(
+            "SELECT f.rel_path, r.path FROM files f JOIN roots r ON r.id = f.root_id
+             WHERE f.id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?)
+    }
+
     /// (absolute path, content_key, lufs, peak_db)
     pub fn load_info(&self, id: i64) -> Result<(String, String, Option<f64>, Option<f32>)> {
         let (root, rel, key, lufs, peak): (String, String, String, Option<f64>, Option<f32>) =
@@ -324,6 +334,43 @@ impl Db {
         )?;
         let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    /// Records the new location and appends to the undo log.
+    pub fn apply_rename(&self, id: i64, old_rel: &str, new_rel: &str) -> Result<()> {
+        let filename = new_rel.rsplit(['/', '\\']).next().unwrap_or(new_rel).to_string();
+        self.conn.execute(
+            "UPDATE files SET rel_path = ?2, filename = ?3 WHERE id = ?1",
+            params![id, new_rel, filename],
+        )?;
+        self.conn.execute(
+            "INSERT INTO rename_log (file_id, old_rel_path, new_rel_path, at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, old_rel, new_rel, now()],
+        )?;
+        Ok(())
+    }
+
+    /// Most recent rename: (log id, file id, old rel_path, new rel_path, root path).
+    pub fn last_rename(&self) -> Result<Option<(i64, i64, String, String, String)>> {
+        let r = self
+            .conn
+            .query_row(
+                "SELECT l.id, l.file_id, l.old_rel_path, l.new_rel_path, r.path
+                 FROM rename_log l
+                 JOIN files f ON f.id = l.file_id
+                 JOIN roots r ON r.id = f.root_id
+                 ORDER BY l.id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .optional()?;
+        Ok(r)
+    }
+
+    pub fn drop_rename_log_entry(&self, log_id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM rename_log WHERE id = ?1", params![log_id])?;
+        Ok(())
     }
 
     /// (id, content_key, duration_ms, feature blob) for the similarity index.

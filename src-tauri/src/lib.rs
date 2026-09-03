@@ -4,6 +4,7 @@ pub mod cache;
 pub mod db;
 pub mod ident;
 pub mod player;
+pub mod rename;
 pub mod scan;
 pub mod search;
 pub mod similar;

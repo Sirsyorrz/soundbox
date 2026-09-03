@@ -38,6 +38,11 @@ interface State {
   selectById: (id: number) => Promise<void>;
   setSimilarGate: (v: boolean) => void;
   currentItem: () => Item | null;
+  renaming: boolean;
+  beginRename: () => void;
+  cancelRename: () => void;
+  commitRename: (stem: string) => Promise<void>;
+  undoRename: () => Promise<void>;
   toggleFavorite: (id: number) => Promise<void>;
   addTag: (id: number, tag: string) => Promise<void>;
   removeTag: (id: number, tag: string) => Promise<void>;
@@ -87,6 +92,7 @@ export const useStore = create<State>((set, get) => ({
   roots: [],
   tags: [],
   filter: { favoritesOnly: false, tag: null },
+  renaming: false,
   librarySize: 0,
   scanning: null,
   device: "",
@@ -154,6 +160,44 @@ export const useStore = create<State>((set, get) => ({
     const { current, hits } = get();
     if (!current) return null;
     return hits.find(([, i]) => i.id === current.id)?.[1] ?? null;
+  },
+
+  beginRename: () => {
+    if (get().currentItem()) set({ renaming: true });
+  },
+
+  cancelRename: () => set({ renaming: false }),
+
+  commitRename: async (stem) => {
+    const item = get().currentItem();
+    if (!item) return;
+    const previous = item.filename;
+    try {
+      const r = await invoke<{ filename: string; suffixed: boolean }>("rename_file", {
+        id: item.id,
+        stem,
+        allowSuffix: true,
+      });
+      set({
+        renaming: false,
+        message: r.suffixed
+          ? `name taken, saved as ${r.filename}`
+          : `${previous} → ${r.filename}   (Ctrl+Z to undo)`,
+      });
+      await get().refresh();
+    } catch (e) {
+      set({ message: `rename failed: ${e}` });
+    }
+  },
+
+  undoRename: async () => {
+    try {
+      const name = await invoke<string | null>("undo_rename");
+      set({ message: name ? `renamed back to ${name}` : "nothing to undo" });
+      await get().refresh();
+    } catch (e) {
+      set({ message: `undo failed: ${e}` });
+    }
   },
 
   toggleFavorite: async (id) => {

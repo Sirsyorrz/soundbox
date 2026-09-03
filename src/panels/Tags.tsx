@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../state/store";
 
 export function TagEditor() {
@@ -41,6 +41,49 @@ export function TagEditor() {
           if (e.key === "Escape") (e.target as HTMLInputElement).blur();
         }}
       />
+    </div>
+  );
+}
+
+export function RenameBox() {
+  const item = useStore((s) => s.currentItem());
+  const renaming = useStore((s) => s.renaming);
+  const cancel = useStore((s) => s.cancelRename);
+  const commit = useStore((s) => s.commitRename);
+  const [draft, setDraft] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+
+  const stem = item ? item.filename.replace(/\.[^.]+$/, "") : "";
+
+  useEffect(() => {
+    if (renaming) {
+      setDraft(stem);
+      // Select the stem so typing replaces it, as file managers do.
+      requestAnimationFrame(() => {
+        ref.current?.focus();
+        ref.current?.select();
+      });
+    }
+  }, [renaming, stem]);
+
+  if (!renaming || !item) return null;
+  const ext = item.filename.slice(stem.length);
+
+  return (
+    <div className="renamebox">
+      <input
+        ref={ref}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter" && draft.trim()) void commit(draft.trim());
+          if (e.key === "Escape") cancel();
+        }}
+      />
+      <span className="ext">{ext}</span>
+      <button onClick={() => draft.trim() && void commit(draft.trim())}>Rename</button>
+      <button onClick={cancel}>Cancel</button>
     </div>
   );
 }

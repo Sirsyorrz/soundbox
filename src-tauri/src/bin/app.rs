@@ -8,7 +8,7 @@ use soundbox::db::Db;
 use soundbox::player::{normalise_gain, Cmd, Player};
 use soundbox::search::{Filter, Hit, Index, Sort};
 use soundbox::similar::{SimilarIndex, DEFAULT_DURATION_RATIO};
-use soundbox::{audio, cache, scan};
+use soundbox::{audio, cache, rename, scan};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -298,6 +298,37 @@ fn tags(state: State<'_, App>) -> Result<Vec<(String, i64)>, String> {
     state.db.lock().unwrap().tag_counts().map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+struct RenameResult {
+    filename: String,
+    suffixed: bool,
+}
+
+#[tauri::command]
+async fn rename_file(
+    state: State<'_, App>,
+    id: i64,
+    stem: String,
+    allow_suffix: bool,
+) -> Result<RenameResult, String> {
+    let out = {
+        let db = state.db.lock().unwrap();
+        rename::perform(&db, id, &stem, allow_suffix).map_err(|e| e.to_string())?
+    };
+    reload_index(&state)?;
+    Ok(RenameResult { filename: out.filename, suffixed: out.suffixed })
+}
+
+#[tauri::command]
+async fn undo_rename(state: State<'_, App>) -> Result<Option<String>, String> {
+    let name = {
+        let db = state.db.lock().unwrap();
+        rename::undo_last(&db).map_err(|e| e.to_string())?
+    };
+    reload_index(&state)?;
+    Ok(name)
+}
+
 #[tauri::command]
 fn file_path(state: State<'_, App>, id: i64) -> Result<String, String> {
     state.db.lock().unwrap().path_for(id).map_err(|e| e.to_string())
@@ -468,6 +499,8 @@ fn main() {
             library_size,
             search,
             file_path,
+            rename_file,
+            undo_rename,
             toggle_favorite,
             tag_file,
             untag_file,

@@ -397,3 +397,18 @@
   font-size: var(--fs-sm);
   color: var(--fg-faint);
 }
+
+.renamebox {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.renamebox input {
+  flex: 1;
+  min-width: 0;
+}
+.renamebox .ext {
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
