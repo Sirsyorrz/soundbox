@@ -126,8 +126,6 @@ function Detail() {
 }
 
 function Sidebar() {
-  const librarySize = useStore((s) => s.librarySize);
-  const hits = useStore((s) => s.hits);
   const roots = useStore((s) => s.roots);
   const removeRoot = useStore((s) => s.removeRoot);
   const rescanRoot = useStore((s) => s.rescanRoot);
@@ -135,13 +133,6 @@ function Sidebar() {
   return (
     <div className="sidebar">
       <Profiles />
-      <div className="sidebar-h">Library</div>
-      <div className="stat">
-        <b>{librarySize.toLocaleString()}</b> sounds
-      </div>
-      <div className="stat">
-        <b>{hits.length.toLocaleString()}</b> shown
-      </div>
 
       <TagRail />
 
