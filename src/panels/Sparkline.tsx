@@ -18,6 +18,10 @@ export function markPending(ids: number[]) {
   ids.forEach((id) => PENDING.add(id));
 }
 
+export function unmarkPending(ids: number[]) {
+  ids.forEach((id) => PENDING.delete(id));
+}
+
 export function clearSparks() {
   CACHE.clear();
   PENDING.clear();

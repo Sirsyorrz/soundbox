@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { useStore } from "../state/store";
 import type { Hit, Item, Sort } from "../types";
-import { Sparkline, cacheSparks, needsSparks, markPending } from "./Sparkline";
+import { Sparkline, cacheSparks, needsSparks, markPending, unmarkPending } from "./Sparkline";
 
 const OVERSCAN = 8;
 
@@ -165,14 +165,17 @@ export function List() {
   useEffect(() => {
     const ids = needsSparks(slice.map(([, item]) => item.id));
     if (ids.length === 0) return;
-    markPending(ids);
+    // Marked only once the request is actually in flight. Marking before the
+    // debounce would strand these rows as pending forever if scrolling
+    // cancelled the timeout, leaving them permanently blank.
     const t = setTimeout(() => {
+      markPending(ids);
       void invoke<[number, [number, number][]][]>("sparklines", { ids, width: SPARK_W })
         .then((rows) => {
           cacheSparks(rows);
           setSparkTick((n) => n + 1);
         })
-        .catch(() => undefined);
+        .catch(() => unmarkPending(ids));
     }, 40);
     return () => clearTimeout(t);
   }, [slice.map(([, i]) => i.id).join(",")]);

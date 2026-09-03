@@ -462,7 +462,7 @@ fn file_path(state: State<'_, App>, id: i64) -> Result<String, String> {
 
 #[tauri::command]
 async fn load(state: State<'_, App>, id: i64, normalise: bool) -> Result<LoadedDto, String> {
-    let (path, _key, lufs, peak_db) = {
+    let (path, key, lufs, peak_db) = {
         let db = state.db.lock().unwrap();
         let info = db.load_info(id).map_err(|e| e.to_string())?;
         let _ = db.record_play(id);
@@ -476,6 +476,12 @@ async fn load(state: State<'_, App>, id: i64, normalise: bool) -> Result<LoadedD
     // for a short sound. The file is already decoded here, so build detail peaks
     // at display resolution instead.
     let peaks = cache::build_n(&decoded, DETAIL_BUCKETS).to_f32();
+
+    // Heal a missing cache blob, so the list sparkline stops being blank. Costs
+    // nothing here because the file is already decoded.
+    if cache::read(&state.base, &key).is_err() {
+        let _ = cache::write(&state.base, &key, &cache::build(&decoded));
+    }
 
     let gain = if normalise { normalise_gain(lufs, -18.0, peak_db.unwrap_or(-1.0)) } else { 1.0 };
 
