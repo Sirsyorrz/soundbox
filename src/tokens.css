@@ -1,6 +1,10 @@
 /* Every visual constant lives here. Components reference tokens only. */
 
 :root {
+  /* Makes native widgets - select popups, scrollbars, pickers - render dark.
+     Without it WebKit draws them light regardless of our own colours. */
+  color-scheme: dark;
+
   --bg: #0e1116;
   --panel: #141920;
   --panel-2: #10151b;
@@ -79,6 +83,23 @@ select {
 
 button {
   cursor: pointer;
+}
+
+/* WebKit draws the native control and ignores our background unless the
+   default appearance is cleared, which also removes the built-in arrow. */
+select {
+  appearance: none;
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--fg-dim) 50%),
+    linear-gradient(135deg, var(--fg-dim) 50%, transparent 50%);
+  background-position: right 13px center, right 8px center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+select:hover {
+  border-color: var(--accent);
 }
 
 button:hover:not(:disabled) {

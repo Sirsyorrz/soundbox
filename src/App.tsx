@@ -131,7 +131,6 @@ function Sidebar() {
   const roots = useStore((s) => s.roots);
   const removeRoot = useStore((s) => s.removeRoot);
   const rescanRoot = useStore((s) => s.rescanRoot);
-  const addFolder = useStore((s) => s.addFolder);
 
   return (
     <div className="sidebar">
@@ -170,9 +169,6 @@ function Sidebar() {
           </button>
         </div>
       ))}
-      <div className="pad">
-        <button onClick={() => void addFolder()}>Add folder…</button>
-      </div>
     </div>
   );
 }
