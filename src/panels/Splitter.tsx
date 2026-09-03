@@ -9,7 +9,6 @@ interface Bounds {
 }
 
 const LIMITS: Record<string, Bounds> = {
-  "--sidebar-w": { min: 120, reserve: 420 },
   "--list-w": { min: 220, reserve: 320 },
   "--similar-h": { min: 60, reserve: 220 },
 };
@@ -24,8 +23,7 @@ function clamp(name: string, px: number) {
   const b = LIMITS[name];
   if (!b) return px;
   const axisSize = name === "--similar-h" ? innerHeight : innerWidth;
-  const others =
-    name === "--list-w" ? read("--sidebar-w") : name === "--sidebar-w" ? read("--list-w") : 0;
+  const others = name === "--list-w" ? read("--sidebar-w") : 0;
   const max = Math.max(b.min, axisSize - others - b.reserve);
   return Math.round(Math.min(max, Math.max(b.min, px)));
 }

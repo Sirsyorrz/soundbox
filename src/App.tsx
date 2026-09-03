@@ -262,7 +262,6 @@ export default function App() {
       <div style={{ gridArea: "sidebar", minHeight: 0 }}>
         <Sidebar />
       </div>
-      <Splitter axis="x" varName="--sidebar-w" area="gutA" />
       <div style={{ gridArea: "list", minHeight: 0, minWidth: 0 }}>
         <List />
       </div>
