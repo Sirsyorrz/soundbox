@@ -25,7 +25,7 @@
   --region: rgba(255, 204, 78, 0.12);
 
   --sidebar-w: 200px;
-  --list-w: 380px;
+  --list-w: 700px;
   --detail-h: 300px;
   --similar-h: 150px;
   --similar-w: 320px;
@@ -36,7 +36,7 @@
   --sp-4: 16px;
 
   --radius: 6px;
-  --row-h: 44px;
+  --row-h: 26px;
 
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", monospace;

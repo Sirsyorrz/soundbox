@@ -3,9 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "./state/store";
 import { layoutStyle } from "./layout";
-import type { Sort } from "./types";
 import { Waveform } from "./panels/Waveform";
 import { List } from "./panels/List";
+import { Similar } from "./panels/Similar";
 import "./app.css";
 
 function Search() {
@@ -16,8 +16,6 @@ function Search() {
   const setLooping = useStore((s) => s.setLooping);
   const normalise = useStore((s) => s.normalise);
   const setNormalise = useStore((s) => s.setNormalise);
-  const sort = useStore((s) => s.sort);
-  const setSort = useStore((s) => s.setSort);
   const volume = useStore((s) => s.volume);
   const setVolume = useStore((s) => s.setVolume);
   const ref = useRef<HTMLInputElement>(null);
@@ -57,18 +55,6 @@ function Search() {
         />
         normalise
       </label>
-      <select
-        value={sort}
-        title="Sort order"
-        onChange={(e) => void setSort(e.target.value as Sort)}
-      >
-        <option value="relevance">relevance</option>
-        <option value="name">name</option>
-        <option value="added">recently added</option>
-        <option value="modified">file date</option>
-        <option value="recent">recently played</option>
-        <option value="duration">duration</option>
-      </select>
       <label className="vol" title={`Volume ${Math.round(volume * 100)}%`}>
         vol
         <input
@@ -116,6 +102,7 @@ function Sidebar() {
   const hits = useStore((s) => s.hits);
   const roots = useStore((s) => s.roots);
   const removeRoot = useStore((s) => s.removeRoot);
+  const rescanRoot = useStore((s) => s.rescanRoot);
   const addFolder = useStore((s) => s.addFolder);
 
   return (
@@ -135,6 +122,13 @@ function Sidebar() {
           <span className="root-label">{r.label}</span>
           <button
             className="x"
+            title="Rescan this folder for new or changed sounds"
+            onClick={() => void rescanRoot(r.id)}
+          >
+            ⟳
+          </button>
+          <button
+            className="x"
             title={`Remove ${r.path} from the library.\nFiles on disk are not touched.`}
             onClick={() => {
               if (confirm(`Remove "${r.label}" from the library?\n\nNo files on disk are deleted.`))
@@ -148,15 +142,6 @@ function Sidebar() {
       <div className="pad">
         <button onClick={() => void addFolder()}>Add folder…</button>
       </div>
-    </div>
-  );
-}
-
-function Similar() {
-  return (
-    <div className="similar">
-      <div className="sidebar-h">Similar sounds</div>
-      <div className="dim pad">Phase 3</div>
     </div>
   );
 }

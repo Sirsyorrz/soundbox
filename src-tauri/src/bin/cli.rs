@@ -4,7 +4,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::{bail, Result};
 use soundbox::{analysis, audio, cache, db::Db, ident, scan};
 
+/// `SOUNDBOX_DATA` overrides the library location, so a scratch index can be
+/// built without disturbing the real one.
 fn data_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("SOUNDBOX_DATA") {
+        return PathBuf::from(d);
+    }
     dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("SoundBox")
 }
 
@@ -19,12 +24,14 @@ fn main() -> Result<()> {
         Some("stats") => cmd_stats(),
         Some("play") => cmd_play(&args[1..]),
         Some("search") => cmd_search(&args[1..]),
+        Some("similar") => cmd_similar(&args[1..]),
         _ => {
             eprintln!("usage:");
             eprintln!("  soundbox-cli scan <dir>     index a folder");
             eprintln!("  soundbox-cli probe <file..> analyse without touching the db");
             eprintln!("  soundbox-cli stats          summarise the index");
             eprintln!("  soundbox-cli play <file>    audition through the audio thread");
+            eprintln!("  soundbox-cli similar <query>  nearest neighbours of the first match");
             Ok(())
         }
     }
@@ -173,13 +180,46 @@ fn cmd_search(args: &[String]) -> Result<()> {
 
     for q in args {
         let t = std::time::Instant::now();
-        let hits = ix.search(q, 20, soundbox::search::Sort::Relevance);
+        let hits = ix.search(q, 20, soundbox::search::Sort::Relevance, false);
         let el = t.elapsed();
         println!("\n  \"{q}\" -> {} hits in {:?}", hits.len(), el);
         for h in hits.iter().take(5) {
             let it = ix.get(h.id).unwrap();
             println!("     {:>6}  {}{}  [{}]", h.score, it.filename,
                 if h.via_folder { " (via folder)" } else { "" }, it.folder);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_similar(args: &[String]) -> Result<()> {
+    use soundbox::search::{Index, Sort};
+    use soundbox::similar::{SimilarIndex, DEFAULT_DURATION_RATIO};
+
+    let db = Db::open(&data_dir().join("library.db"))?;
+    let mut ix = Index::new(db.all_items()?);
+
+    let t = std::time::Instant::now();
+    let sim = SimilarIndex::build(db.all_features()?);
+    println!("similarity index: {} entries in {:?}", sim.len(), t.elapsed());
+
+    let query = args.first().cloned().unwrap_or_default();
+    let hits = ix.search(&query, 1, Sort::Relevance, false);
+    let Some(seed) = hits.first() else {
+        println!("no match for {query:?}");
+        return Ok(());
+    };
+    let seed_item = ix.get(seed.id).unwrap().clone();
+    println!("\nseed: {} [{}] {:.2}s",
+        seed_item.filename, seed_item.folder, seed_item.duration_ms as f64 / 1000.0);
+
+    let t = std::time::Instant::now();
+    let ns = sim.query(seed.id, 8, DEFAULT_DURATION_RATIO);
+    println!("query in {:?}\n", t.elapsed());
+    for n in ns {
+        if let Some(i) = ix.get(n.id) {
+            println!("  {:.4}  {:<52} [{}] {:.2}s",
+                n.score, i.filename, i.folder, i.duration_ms as f64 / 1000.0);
         }
     }
     Ok(())

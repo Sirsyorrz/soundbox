@@ -7,6 +7,7 @@ use serde::Serialize;
 use soundbox::db::Db;
 use soundbox::player::{normalise_gain, Cmd, Player};
 use soundbox::search::{Hit, Index, Sort};
+use soundbox::similar::{SimilarIndex, DEFAULT_DURATION_RATIO};
 use soundbox::{audio, cache, scan};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -14,6 +15,7 @@ use tauri_plugin_dialog::DialogExt;
 struct App {
     db: Mutex<Db>,
     index: Mutex<Index>,
+    similar: Mutex<SimilarIndex>,
     player: Option<Player>,
     current: Mutex<Option<CurrentFile>>,
     base: PathBuf,
@@ -39,6 +41,9 @@ struct ItemDto {
     channels: usize,
     sample_rate: u32,
     ext: String,
+    mtime: i64,
+    added_at: i64,
+    last_played: i64,
 }
 
 #[derive(Serialize, Clone)]
@@ -67,9 +72,16 @@ struct StatusDto {
 }
 
 fn reload_index(app: &App) -> Result<usize, String> {
-    let items = app.db.lock().unwrap().all_items().map_err(|e| e.to_string())?;
+    let (items, feats) = {
+        let db = app.db.lock().unwrap();
+        (
+            db.all_items().map_err(|e| e.to_string())?,
+            db.all_features().map_err(|e| e.to_string())?,
+        )
+    };
     let n = items.len();
     *app.index.lock().unwrap() = Index::new(items);
+    *app.similar.lock().unwrap() = SimilarIndex::build(feats);
     Ok(n)
 }
 
@@ -118,6 +130,38 @@ async fn add_root(
 }
 
 #[tauri::command]
+async fn rescan_root(
+    handle: tauri::AppHandle,
+    state: State<'_, App>,
+    id: i64,
+) -> Result<usize, String> {
+    let path = {
+        let db = state.db.lock().unwrap();
+        db.roots()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|(rid, _, _)| *rid == id)
+            .map(|(_, p, _)| p)
+            .ok_or_else(|| "no such folder".to_string())?
+    };
+    let dir = PathBuf::from(&path);
+    if !dir.is_dir() {
+        return Err(format!("{path} is no longer reachable"));
+    }
+    {
+        let db = state.db.lock().unwrap();
+        scan::scan_root(&db, &state.base, id, &dir, |p| {
+            if p.total < 100 || p.done % (p.total / 100).max(1) == 0 {
+                let _ = handle.emit("scan:progress", ScanEvent { done: p.done, total: p.total });
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    }
+    let _ = handle.emit("scan:done", 0usize);
+    reload_index(&state)
+}
+
+#[tauri::command]
 fn roots(state: State<'_, App>) -> Result<Vec<(i64, String, String)>, String> {
     state.db.lock().unwrap().roots().map_err(|e| e.to_string())
 }
@@ -128,9 +172,15 @@ fn library_size(state: State<'_, App>) -> usize {
 }
 
 #[tauri::command]
-fn search(state: State<'_, App>, query: String, limit: usize, sort: Sort) -> Vec<(Hit, ItemDto)> {
+fn search(
+    state: State<'_, App>,
+    query: String,
+    limit: usize,
+    sort: Sort,
+    desc: bool,
+) -> Vec<(Hit, ItemDto)> {
     let mut ix = state.index.lock().unwrap();
-    let hits = ix.search(&query, limit, sort);
+    let hits = ix.search(&query, limit, sort, desc);
     hits.into_iter()
         .filter_map(|h| {
             ix.get(h.id).map(|i| {
@@ -144,9 +194,63 @@ fn search(state: State<'_, App>, query: String, limit: usize, sort: Sort) -> Vec
                         channels: i.channels,
                         sample_rate: i.sample_rate,
                         ext: i.ext.clone(),
+                        mtime: i.mtime,
+                        added_at: i.added_at,
+                        last_played: i.last_played,
                     },
                 )
             })
+        })
+        .collect()
+}
+
+#[derive(Serialize)]
+struct SimilarDto {
+    item: ItemDto,
+    score: f32,
+}
+
+#[tauri::command]
+fn similar(state: State<'_, App>, id: i64, limit: usize, gate: bool) -> Vec<SimilarDto> {
+    let ratio = if gate { DEFAULT_DURATION_RATIO } else { 0.0 };
+    let neighbours = state.similar.lock().unwrap().query(id, limit, ratio);
+    let ix = state.index.lock().unwrap();
+    neighbours
+        .into_iter()
+        .filter_map(|n| {
+            ix.get(n.id).map(|i| SimilarDto {
+                item: ItemDto {
+                    id: i.id,
+                    filename: i.filename.clone(),
+                    folder: i.folder.clone(),
+                    duration_ms: i.duration_ms,
+                    channels: i.channels,
+                    sample_rate: i.sample_rate,
+                    ext: i.ext.clone(),
+                    mtime: i.mtime,
+                    added_at: i.added_at,
+                    last_played: i.last_played,
+                },
+                score: n.score,
+            })
+        })
+        .collect()
+}
+
+/// Sparklines for the rows currently on screen. Reads cached peak blobs, so no
+/// decoding happens and scrolling stays cheap.
+#[tauri::command]
+fn sparklines(state: State<'_, App>, ids: Vec<i64>, width: usize) -> Vec<(i64, Vec<(f32, f32)>)> {
+    let keys: Vec<(i64, String)> = {
+        let ix = state.index.lock().unwrap();
+        ids.iter().filter_map(|id| ix.get(*id).map(|i| (*id, i.content_key.clone()))).collect()
+    };
+    keys.into_iter()
+        .map(|(id, key)| {
+            let peaks = cache::read(&state.base, &key)
+                .map(|p| p.mono_downsample(width))
+                .unwrap_or_default();
+            (id, peaks)
         })
         .collect()
 }
@@ -272,6 +376,7 @@ fn main() {
             let base = base_dir();
             let db = Db::open(&base.join("library.db"))?;
             let items = db.all_items().unwrap_or_default();
+            let feats = db.all_features().unwrap_or_default();
             let player = match Player::spawn() {
                 Ok(p) => Some(p),
                 Err(e) => {
@@ -282,6 +387,7 @@ fn main() {
             app.manage(App {
                 db: Mutex::new(db),
                 index: Mutex::new(Index::new(items)),
+                similar: Mutex::new(SimilarIndex::build(feats)),
                 player,
                 current: Mutex::new(None),
                 base,
@@ -295,6 +401,8 @@ fn main() {
             library_size,
             search,
             file_path,
+            similar,
+            sparklines,
             load,
             play,
             toggle,
@@ -302,6 +410,7 @@ fn main() {
             set_looping,
             set_volume,
             remove_root,
+            rescan_root,
             status,
             device_info
         ])

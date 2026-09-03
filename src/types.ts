@@ -6,6 +6,9 @@ export interface Item {
   channels: number;
   sample_rate: number;
   ext: string;
+  mtime: number;
+  added_at: number;
+  last_played: number;
 }
 
 export interface Hit {
@@ -15,7 +18,14 @@ export interface Hit {
   via_folder: boolean;
 }
 
-export type Sort = "relevance" | "name" | "added" | "modified" | "recent" | "duration";
+export type Sort =
+  | "relevance"
+  | "name"
+  | "folder"
+  | "added"
+  | "modified"
+  | "recent"
+  | "duration";
 
 export interface Root {
   id: number;

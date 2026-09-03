@@ -51,49 +51,134 @@
   color: var(--fg-faint);
 }
 
-.list {
+.listwrap {
   height: 100%;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border-right: 1px solid var(--line);
   background: var(--panel-2);
 }
-.row {
-  padding: var(--sp-1) var(--sp-3);
-  border-bottom: 1px solid var(--line-soft);
-  cursor: grab;
+
+.thead {
+  display: grid;
+  align-items: center;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+  position: relative;
+  flex: none;
+}
+.th {
+  padding: 5px var(--sp-2);
+  cursor: pointer;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
-}
-.row:hover {
-  background: var(--row-hover);
-}
-.row.sel {
-  background: var(--row-sel);
-}
-.row .name {
+  align-items: center;
+  gap: 3px;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  border-right: 1px solid var(--line-soft);
+  user-select: none;
 }
-.row .hl {
+.th:last-of-type {
+  border-right: none;
+}
+.th.r {
+  justify-content: flex-end;
+}
+.th:hover {
+  background: var(--row-hover);
+  color: var(--fg);
+}
+.th.active {
   color: var(--accent);
-  font-weight: 600;
 }
-.row .meta {
-  display: flex;
-  gap: var(--sp-2);
+.arrow {
+  font-size: 9px;
+}
+
+.relevance-tag,
+.reset-sort {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  color: var(--fg-faint);
+  pointer-events: none;
+}
+.reset-sort {
+  pointer-events: auto;
+  padding: 0 5px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.reset-sort:hover {
+  color: var(--accent);
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.trow {
+  display: grid;
+  align-items: center;
+  border-bottom: 1px solid var(--line-soft);
+  cursor: grab;
+}
+.trow:hover {
+  background: var(--row-hover);
+}
+.trow.sel {
+  background: var(--row-sel);
+}
+.td {
+  padding: 0 var(--sp-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
+}
+.td.name {
+  color: var(--fg);
+}
+.td.r {
+  text-align: right;
+}
+.td.num {
+  font-family: var(--mono);
   font-size: var(--fs-sm);
   color: var(--fg-faint);
 }
-.row .folder {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.spark-cell {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-2);
 }
-.row .folder.via {
+.spark {
+  display: block;
+  opacity: 0.9;
+}
+.th.nosort {
+  cursor: default;
+}
+.th.nosort:hover {
+  background: none;
+  color: var(--fg-faint);
+}
+.td.via {
   color: var(--accent-dim);
+}
+.hl {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .detail {
@@ -179,4 +264,56 @@
 .root .x:hover {
   color: var(--bad);
   border-color: var(--bad);
+}
+
+.row-h {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.row-h label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.simlist {
+  overflow-y: auto;
+}
+.simrow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 3px var(--sp-3);
+  cursor: pointer;
+  border-bottom: 1px solid var(--line-soft);
+  overflow: hidden;
+}
+.simrow:hover {
+  background: var(--row-hover);
+}
+/* Score as a background fill; a separate bar column would waste width. */
+.simrow .bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--accent);
+  opacity: 0.13;
+  pointer-events: none;
+}
+.simname {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  z-index: 1;
+}
+.simscore {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+  z-index: 1;
 }
