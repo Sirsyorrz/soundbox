@@ -190,7 +190,11 @@ impl Db {
             "SELECT f.id, f.filename, f.rel_path, f.duration_ms, f.channels,
                     f.sample_rate, f.ext, f.content_key, f.scanned_at, f.mtime,
                     COALESCE((SELECT MAX(played_at) FROM plays p
-                              WHERE p.content_key = f.content_key), 0)
+                              WHERE p.content_key = f.content_key), 0),
+                    EXISTS(SELECT 1 FROM favorites fa WHERE fa.content_key = f.content_key),
+                    COALESCE((SELECT GROUP_CONCAT(t.name, ' ') FROM file_tags ft
+                              JOIN tags t ON t.id = ft.tag_id
+                              WHERE ft.content_key = f.content_key), '')
              FROM files f WHERE f.status = 'ok' ORDER BY f.rel_path",
         )?;
         let rows = st
@@ -209,6 +213,12 @@ impl Db {
                     added_at: r.get(8)?,
                     mtime: r.get(9)?,
                     last_played: r.get(10)?,
+                    favorite: r.get(11)?,
+                    tags: r
+                        .get::<_, String>(12)?
+                        .split_whitespace()
+                        .map(str::to_string)
+                        .collect(),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -253,6 +263,67 @@ impl Db {
             params![id, now()],
         )?;
         Ok(())
+    }
+
+    pub fn toggle_favorite(&self, id: i64) -> Result<bool> {
+        let key: String =
+            self.conn.query_row("SELECT content_key FROM files WHERE id = ?1", params![id], |r| r.get(0))?;
+        let is_fav: bool = self
+            .conn
+            .query_row("SELECT 1 FROM favorites WHERE content_key = ?1", params![key], |_| Ok(true))
+            .optional()?
+            .unwrap_or(false);
+        if is_fav {
+            self.conn.execute("DELETE FROM favorites WHERE content_key = ?1", params![key])?;
+        } else {
+            self.conn.execute(
+                "INSERT OR REPLACE INTO favorites (content_key, added_at) VALUES (?1, ?2)",
+                params![key, now()],
+            )?;
+        }
+        Ok(!is_fav)
+    }
+
+    /// Tags attach to content, so they apply to every alias of a recording and
+    /// survive renames.
+    pub fn tag_file(&self, id: i64, tag: &str) -> Result<()> {
+        let tag = tag.trim().to_lowercase();
+        if tag.is_empty() {
+            return Ok(());
+        }
+        let key: String =
+            self.conn.query_row("SELECT content_key FROM files WHERE id = ?1", params![id], |r| r.get(0))?;
+        self.conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", params![tag])?;
+        let tag_id: i64 =
+            self.conn.query_row("SELECT id FROM tags WHERE name = ?1", params![tag], |r| r.get(0))?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO file_tags (content_key, tag_id) VALUES (?1, ?2)",
+            params![key, tag_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn untag_file(&self, id: i64, tag: &str) -> Result<()> {
+        let tag = tag.trim().to_lowercase();
+        let key: String =
+            self.conn.query_row("SELECT content_key FROM files WHERE id = ?1", params![id], |r| r.get(0))?;
+        self.conn.execute(
+            "DELETE FROM file_tags WHERE content_key = ?1
+             AND tag_id = (SELECT id FROM tags WHERE name = ?2)",
+            params![key, tag],
+        )?;
+        Ok(())
+    }
+
+    /// (name, number of files carrying it), commonest first.
+    pub fn tag_counts(&self) -> Result<Vec<(String, i64)>> {
+        let mut st = self.conn.prepare(
+            "SELECT t.name, COUNT(ft.content_key) c FROM tags t
+             LEFT JOIN file_tags ft ON ft.tag_id = t.id
+             GROUP BY t.id ORDER BY c DESC, t.name",
+        )?;
+        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     /// (id, content_key, duration_ms, feature blob) for the similarity index.

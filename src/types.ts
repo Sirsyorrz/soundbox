@@ -9,6 +9,13 @@ export interface Item {
   mtime: number;
   added_at: number;
   last_played: number;
+  favorite: boolean;
+  tags: string[];
+}
+
+export interface Filter {
+  favoritesOnly: boolean;
+  tag: string | null;
 }
 
 export interface Hit {

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use soundbox::db::Db;
 use soundbox::player::{normalise_gain, Cmd, Player};
-use soundbox::search::{Hit, Index, Sort};
+use soundbox::search::{Filter, Hit, Index, Sort};
 use soundbox::similar::{SimilarIndex, DEFAULT_DURATION_RATIO};
 use soundbox::{audio, cache, scan};
 use tauri::{Emitter, Manager, State};
@@ -23,6 +23,9 @@ struct App {
 
 struct CurrentFile {
     frames: usize,
+    /// Retained so the detail view can rebuild peaks for any zoom range
+    /// without decoding again. Shared with the audio thread.
+    audio: Arc<audio::Decoded>,
 }
 
 /// Enough detail for a full-width waveform without sending megabytes to the UI.
@@ -44,6 +47,8 @@ struct ItemDto {
     mtime: i64,
     added_at: i64,
     last_played: i64,
+    favorite: bool,
+    tags: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -178,9 +183,10 @@ fn search(
     limit: usize,
     sort: Sort,
     desc: bool,
+    filter: Filter,
 ) -> Vec<(Hit, ItemDto)> {
     let mut ix = state.index.lock().unwrap();
-    let hits = ix.search(&query, limit, sort, desc);
+    let hits = ix.search(&query, limit, sort, desc, &filter);
     hits.into_iter()
         .filter_map(|h| {
             ix.get(h.id).map(|i| {
@@ -197,6 +203,8 @@ fn search(
                         mtime: i.mtime,
                         added_at: i.added_at,
                         last_played: i.last_played,
+                        favorite: i.favorite,
+                        tags: i.tags.clone(),
                     },
                 )
             })
@@ -230,6 +238,8 @@ fn similar(state: State<'_, App>, id: i64, limit: usize, gate: bool) -> Vec<Simi
                     mtime: i.mtime,
                     added_at: i.added_at,
                     last_played: i.last_played,
+                    favorite: i.favorite,
+                    tags: i.tags.clone(),
                 },
                 score: n.score,
             })
@@ -253,6 +263,39 @@ fn sparklines(state: State<'_, App>, ids: Vec<i64>, width: usize) -> Vec<(i64, V
             (id, peaks)
         })
         .collect()
+}
+
+#[tauri::command]
+async fn toggle_favorite(state: State<'_, App>, id: i64) -> Result<bool, String> {
+    let now_fav = {
+        let db = state.db.lock().unwrap();
+        db.toggle_favorite(id).map_err(|e| e.to_string())?
+    };
+    reload_index(&state)?;
+    Ok(now_fav)
+}
+
+#[tauri::command]
+async fn tag_file(state: State<'_, App>, id: i64, tag: String) -> Result<(), String> {
+    {
+        let db = state.db.lock().unwrap();
+        db.tag_file(id, &tag).map_err(|e| e.to_string())?;
+    }
+    reload_index(&state).map(|_| ())
+}
+
+#[tauri::command]
+async fn untag_file(state: State<'_, App>, id: i64, tag: String) -> Result<(), String> {
+    {
+        let db = state.db.lock().unwrap();
+        db.untag_file(id, &tag).map_err(|e| e.to_string())?;
+    }
+    reload_index(&state).map(|_| ())
+}
+
+#[tauri::command]
+fn tags(state: State<'_, App>) -> Result<Vec<(String, i64)>, String> {
+    state.db.lock().unwrap().tag_counts().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -293,11 +336,35 @@ async fn load(state: State<'_, App>, id: i64, normalise: bool) -> Result<LoadedD
         lufs,
     };
 
-    *state.current.lock().unwrap() = Some(CurrentFile { frames: decoded.frames() });
+    *state.current.lock().unwrap() =
+        Some(CurrentFile { frames: decoded.frames(), audio: decoded.clone() });
     if let Some(p) = &state.player {
         p.send(Cmd::Load { audio: decoded, gain });
     }
     Ok(dto)
+}
+
+/// Peaks for an arbitrary frame range at display resolution, for zooming.
+#[tauri::command]
+fn peaks_range(
+    state: State<'_, App>,
+    start: usize,
+    end: usize,
+    width: usize,
+) -> Vec<Vec<(f32, f32)>> {
+    let Some(cur) = state.current.lock().unwrap().as_ref().map(|c| c.audio.clone()) else {
+        return Vec::new();
+    };
+    let frames = cur.frames();
+    let start = start.min(frames);
+    let end = end.clamp(start + 1, frames.max(1));
+
+    let slice = audio::Decoded {
+        samples: cur.samples[start * cur.channels..end * cur.channels].to_vec(),
+        channels: cur.channels,
+        sample_rate: cur.sample_rate,
+    };
+    cache::build_n(&slice, width.clamp(1, 8000)).to_f32()
 }
 
 #[tauri::command]
@@ -401,10 +468,15 @@ fn main() {
             library_size,
             search,
             file_path,
+            toggle_favorite,
+            tag_file,
+            untag_file,
+            tags,
             similar,
             sparklines,
             load,
             play,
+            peaks_range,
             toggle,
             stop,
             set_looping,

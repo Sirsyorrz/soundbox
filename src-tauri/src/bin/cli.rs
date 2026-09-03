@@ -180,7 +180,7 @@ fn cmd_search(args: &[String]) -> Result<()> {
 
     for q in args {
         let t = std::time::Instant::now();
-        let hits = ix.search(q, 20, soundbox::search::Sort::Relevance, false);
+        let hits = ix.search(q, 20, soundbox::search::Sort::Relevance, false, &Default::default());
         let el = t.elapsed();
         println!("\n  \"{q}\" -> {} hits in {:?}", hits.len(), el);
         for h in hits.iter().take(5) {
@@ -204,7 +204,7 @@ fn cmd_similar(args: &[String]) -> Result<()> {
     println!("similarity index: {} entries in {:?}", sim.len(), t.elapsed());
 
     let query = args.first().cloned().unwrap_or_default();
-    let hits = ix.search(&query, 1, Sort::Relevance, false);
+    let hits = ix.search(&query, 1, Sort::Relevance, false, &Default::default());
     let Some(seed) = hits.first() else {
         println!("no match for {query:?}");
         return Ok(());

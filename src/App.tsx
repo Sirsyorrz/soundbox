@@ -6,6 +6,7 @@ import { layoutStyle } from "./layout";
 import { Waveform } from "./panels/Waveform";
 import { List } from "./panels/List";
 import { Similar } from "./panels/Similar";
+import { TagEditor, TagRail } from "./panels/Tags";
 import "./app.css";
 
 function Search() {
@@ -70,6 +71,29 @@ function Search() {
   );
 }
 
+function Zoom() {
+  const view = useStore((s) => s.view);
+  const current = useStore((s) => s.current);
+  const zoom = useStore((s) => s.zoom);
+  const fit = useStore((s) => s.zoomToFit);
+  if (!current || !view) return null;
+  const pct = (current.frames / Math.max(1, view[1] - view[0])).toFixed(1);
+  return (
+    <span className="zoom">
+      <button onClick={() => zoom(2)} title="Zoom out  ( - )">
+        −
+      </button>
+      <button onClick={() => zoom(0.5)} title="Zoom in  ( + )">
+        +
+      </button>
+      <button onClick={fit} title="Fit whole file  ( 0 )">
+        fit
+      </button>
+      <span className="dim">{pct}x</span>
+    </span>
+  );
+}
+
 function Detail() {
   const current = useStore((s) => s.current);
   const hits = useStore((s) => s.hits);
@@ -87,11 +111,13 @@ function Detail() {
             <span>{current.channels === 1 ? "mono" : `${current.channels} ch`}</span>
             <span>{(current.duration_ms / 1000).toFixed(2)} s</span>
             <span>{current.lufs != null ? `${current.lufs.toFixed(1)} LUFS` : "LUFS n/a"}</span>
+            <Zoom />
           </>
         ) : (
           <span className="dim">select a sound</span>
         )}
       </div>
+      <TagEditor />
       <Waveform />
     </div>
   );
@@ -114,6 +140,8 @@ function Sidebar() {
       <div className="stat">
         <b>{hits.length.toLocaleString()}</b> shown
       </div>
+
+      <TagRail />
 
       <div className="sidebar-h">Folders</div>
       {roots.length === 0 && <div className="dim pad">none yet</div>}
@@ -165,6 +193,7 @@ export default function App() {
   useEffect(() => {
     void useStore.getState().refresh();
     void useStore.getState().loadRoots();
+    void useStore.getState().loadTags();
     void invoke<string>("device_info").then((device) => useStore.setState({ device }));
 
     const un = listen<{ done: number; total: number }>("scan:progress", (e) =>
@@ -195,6 +224,20 @@ export default function App() {
         void s.move(-1);
       }
       if (e.code === "KeyL" && !inInput) s.setLooping(!s.looping);
+      if (inInput) return;
+      if (e.code === "BracketLeft") s.markIn();
+      if (e.code === "BracketRight") s.markOut();
+      if (e.code === "Equal" || e.code === "NumpadAdd") s.zoom(0.5);
+      if (e.code === "Minus" || e.code === "NumpadSubtract") s.zoom(2);
+      if (e.code === "Digit0" || e.code === "Numpad0") s.zoomToFit();
+      if (e.code === "KeyZ" && !e.ctrlKey) s.zoomToRegion();
+      if (e.code === "Enter" && s.region) s.playRegion(s.region);
+      const item = s.currentItem();
+      if (e.code === "KeyF" && item) void s.toggleFavorite(item.id);
+      if (e.code === "KeyT" && item) {
+        e.preventDefault();
+        document.getElementById("tag-input")?.focus();
+      }
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);

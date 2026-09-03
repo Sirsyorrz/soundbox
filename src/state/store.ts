@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import type { Hit, Item, Loaded, Root, Sort } from "../types";
+import type { Filter, Hit, Item, Loaded, Root, Sort } from "../types";
 import { clearSparks } from "../panels/Sparkline";
 import type { LayoutName } from "../layout";
 
@@ -12,6 +12,8 @@ interface State {
   selected: number;
   current: Loaded | null;
   region: [number, number] | null;
+  /** Visible frame range of the detail waveform. */
+  view: [number, number] | null;
   playing: boolean;
   pos: number;
   looping: boolean;
@@ -22,6 +24,8 @@ interface State {
   rowH: number;
   similarGate: boolean;
   roots: Root[];
+  tags: [string, number][];
+  filter: Filter;
   librarySize: number;
   scanning: { done: number; total: number } | null;
   device: string;
@@ -33,8 +37,20 @@ interface State {
   select: (i: number) => Promise<void>;
   selectById: (id: number) => Promise<void>;
   setSimilarGate: (v: boolean) => void;
+  currentItem: () => Item | null;
+  toggleFavorite: (id: number) => Promise<void>;
+  addTag: (id: number, tag: string) => Promise<void>;
+  removeTag: (id: number, tag: string) => Promise<void>;
+  loadTags: () => Promise<void>;
+  setFilter: (f: Filter) => Promise<void>;
   move: (delta: number) => Promise<void>;
   setRegion: (r: [number, number] | null) => void;
+  setView: (v: [number, number]) => void;
+  zoom: (factor: number) => void;
+  zoomToFit: () => void;
+  zoomToRegion: () => void;
+  markIn: () => void;
+  markOut: () => void;
   playRegion: (r?: [number, number]) => void;
   toggle: () => void;
   stop: () => void;
@@ -58,6 +74,7 @@ export const useStore = create<State>((set, get) => ({
   selected: -1,
   current: null,
   region: null,
+  view: null,
   playing: false,
   pos: 0,
   looping: false,
@@ -68,6 +85,8 @@ export const useStore = create<State>((set, get) => ({
   rowH: 26,
   similarGate: true,
   roots: [],
+  tags: [],
+  filter: { favoritesOnly: false, tag: null },
   librarySize: 0,
   scanning: null,
   device: "",
@@ -87,6 +106,7 @@ export const useStore = create<State>((set, get) => ({
       limit: SEARCH_LIMIT,
       sort: get().sort,
       desc: get().desc,
+      filter: get().filter,
     });
     const size = await invoke<number>("library_size");
     set({ hits, librarySize: size });
@@ -101,7 +121,7 @@ export const useStore = create<State>((set, get) => ({
         id: entry[1].id,
         normalise: get().normalise,
       });
-      set({ current: loaded, region: [0, loaded.frames] });
+      set({ current: loaded, region: [0, loaded.frames], view: [0, loaded.frames] });
       get().playRegion([0, loaded.frames]);
     } catch (e) {
       set({ message: `decode failed: ${e}` });
@@ -119,7 +139,7 @@ export const useStore = create<State>((set, get) => ({
     }
     try {
       const loaded = await invoke<Loaded>("load", { id, normalise: get().normalise });
-      set({ current: loaded, region: [0, loaded.frames], selected: -1 });
+      set({ current: loaded, region: [0, loaded.frames], view: [0, loaded.frames], selected: -1 });
       get().playRegion([0, loaded.frames]);
     } catch (e) {
       set({ message: `decode failed: ${e}` });
@@ -128,6 +148,40 @@ export const useStore = create<State>((set, get) => ({
 
   setSimilarGate: (similarGate) => set({ similarGate }),
 
+  // The list row is the source of truth for tags; the loaded audio payload
+  // deliberately carries none so tag edits do not require a re-decode.
+  currentItem: () => {
+    const { current, hits } = get();
+    if (!current) return null;
+    return hits.find(([, i]) => i.id === current.id)?.[1] ?? null;
+  },
+
+  toggleFavorite: async (id) => {
+    await invoke("toggle_favorite", { id });
+    await get().refresh();
+  },
+
+  addTag: async (id, tag) => {
+    await invoke("tag_file", { id, tag });
+    await get().loadTags();
+    await get().refresh();
+  },
+
+  removeTag: async (id, tag) => {
+    await invoke("untag_file", { id, tag });
+    await get().loadTags();
+    await get().refresh();
+  },
+
+  loadTags: async () => {
+    set({ tags: await invoke<[string, number][]>("tags") });
+  },
+
+  setFilter: async (filter) => {
+    set({ filter });
+    await get().refresh();
+  },
+
   move: async (delta) => {
     const { selected, hits } = get();
     const next = Math.max(0, Math.min(hits.length - 1, selected + delta));
@@ -135,6 +189,45 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setRegion: (region) => set({ region }),
+
+  setView: (view) => set({ view }),
+
+  zoom: (factor) => {
+    const { current, view, pos, playing } = get();
+    if (!current || !view) return;
+    const span = view[1] - view[0];
+    // Zoom about the playhead when it is on screen, otherwise the view centre.
+    const anchor = playing && pos >= view[0] && pos <= view[1] ? pos : view[0] + span / 2;
+    const next = Math.min(current.frames, Math.max(256, Math.round(span * factor)));
+    let start = Math.round(anchor - ((anchor - view[0]) / span) * next);
+    start = Math.max(0, Math.min(current.frames - next, start));
+    set({ view: [start, start + next] });
+  },
+
+  zoomToFit: () => {
+    const { current } = get();
+    if (current) set({ view: [0, current.frames] });
+  },
+
+  zoomToRegion: () => {
+    const { region, current } = get();
+    if (!region || !current || region[1] - region[0] < 256) return;
+    set({ view: [region[0], region[1]] });
+  },
+
+  markIn: () => {
+    const { region, pos, current } = get();
+    if (!current || !region) return;
+    const start = Math.min(pos, region[1] - 1);
+    set({ region: [Math.max(0, start), region[1]] });
+  },
+
+  markOut: () => {
+    const { region, pos, current } = get();
+    if (!current || !region) return;
+    const end = Math.max(pos, region[0] + 1);
+    set({ region: [region[0], Math.min(current.frames, end)] });
+  },
 
   playRegion: (r) => {
     const region = r ?? get().region;

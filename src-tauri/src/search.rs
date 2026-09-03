@@ -4,6 +4,8 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 /// Filename hits outrank folder hits; a folder name is weaker evidence.
 const W_NAME: u32 = 3;
 const W_FOLDER: u32 = 1;
+/// Tags are user-authored, so a tag hit is stronger evidence than a folder name.
+const W_TAG: u32 = 2;
 /// A folder must match this well before its whole contents are pulled in.
 const FOLDER_EXPAND_MIN: u32 = 40;
 
@@ -20,6 +22,29 @@ pub struct Item {
     pub added_at: i64,
     pub mtime: i64,
     pub last_played: i64,
+    pub favorite: bool,
+    pub tags: Vec<String>,
+}
+
+#[derive(Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Filter {
+    #[serde(default)]
+    pub favorites_only: bool,
+    #[serde(default)]
+    pub tag: Option<String>,
+}
+
+impl Filter {
+    fn keeps(&self, i: &Item) -> bool {
+        if self.favorites_only && !i.favorite {
+            return false;
+        }
+        match &self.tag {
+            Some(t) => i.tags.iter().any(|x| x == t),
+            None => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -70,11 +95,19 @@ impl Index {
         self.items.iter().find(|i| i.id == id)
     }
 
-    pub fn search(&mut self, query: &str, limit: usize, sort: Sort, desc: bool) -> Vec<Hit> {
+    pub fn search(
+        &mut self,
+        query: &str,
+        limit: usize,
+        sort: Sort,
+        desc: bool,
+        filter: &Filter,
+    ) -> Vec<Hit> {
         if query.trim().is_empty() {
             let mut hits: Vec<Hit> = self
                 .items
                 .iter()
+                .filter(|i| filter.keeps(i))
                 .map(|i| Hit { id: i.id, score: 0, indices: Vec::new(), via_folder: false })
                 .collect();
             self.apply_sort(&mut hits, sort, Sort::Name, desc);
@@ -103,16 +136,29 @@ impl Index {
 
         let mut hits: Vec<Hit> = Vec::new();
         for item in &self.items {
+            if !filter.keeps(item) {
+                continue;
+            }
             idx_buf.clear();
             buf.clear();
             let name_score =
                 pat.indices(Utf32Str::new(&item.filename, &mut buf), matcher, &mut idx_buf);
             let folder_score = folder_scores.get(item.folder.as_str()).copied();
+            let tag_score = item
+                .tags
+                .iter()
+                .filter_map(|t| {
+                    buf.clear();
+                    pat.score(Utf32Str::new(t, &mut buf), matcher)
+                })
+                .max();
 
-            let (score, via_folder) = match (name_score, folder_score) {
-                (Some(n), Some(f)) => (n * W_NAME + f * W_FOLDER, false),
-                (Some(n), None) => (n * W_NAME, false),
-                (None, Some(f)) if f >= FOLDER_EXPAND_MIN => (f * W_FOLDER, true),
+            let (score, via_folder) = match (name_score, folder_score, tag_score) {
+                (Some(n), f, t) => {
+                    (n * W_NAME + f.unwrap_or(0) * W_FOLDER + t.unwrap_or(0) * W_TAG, false)
+                }
+                (None, _, Some(t)) => (t * W_TAG, false),
+                (None, Some(f), None) if f >= FOLDER_EXPAND_MIN => (f * W_FOLDER, true),
                 _ => continue,
             };
 
@@ -182,6 +228,8 @@ mod tests {
             added_at: id,
             mtime: id,
             last_played: 0,
+            favorite: false,
+            tags: Vec::new(),
         }
     }
 
@@ -194,20 +242,58 @@ mod tests {
         ])
     }
 
+    fn tagged(id: i64, folder: &str, filename: &str, tags: &[&str], fav: bool) -> Item {
+        let mut i = item(id, folder, filename);
+        i.tags = tags.iter().map(|t| t.to_string()).collect();
+        i.favorite = fav;
+        i
+    }
+
+    #[test]
+    fn tag_match_finds_a_file_whose_name_does_not_match() {
+        let mut ix = Index::new(vec![tagged(1, "Music", "GB_004.wav", &["glass", "break"], false)]);
+        let hits = ix.search("glass", 10, Sort::Relevance, false, &Filter::default());
+        assert_eq!(hits.len(), 1, "tag should be searchable");
+    }
+
+    #[test]
+    fn favorites_filter_excludes_the_rest() {
+        let mut ix = Index::new(vec![
+            tagged(1, "a", "one.wav", &[], true),
+            tagged(2, "a", "two.wav", &[], false),
+        ]);
+        let f = Filter { favorites_only: true, tag: None };
+        let hits = ix.search("", 10, Sort::Relevance, false, &f);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, 1);
+    }
+
+    #[test]
+    fn tag_filter_applies_to_a_query_too() {
+        let mut ix = Index::new(vec![
+            tagged(1, "a", "hit.wav", &["metal"], false),
+            tagged(2, "a", "hit_two.wav", &["wood"], false),
+        ]);
+        let f = Filter { favorites_only: false, tag: Some("metal".into()) };
+        let hits = ix.search("hit", 10, Sort::Relevance, false, &f);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, 1);
+    }
+
     #[test]
     fn empty_query_returns_everything() {
-        assert_eq!(index().search("", 100, Sort::Relevance, false).len(), 4);
+        assert_eq!(index().search("", 100, Sort::Relevance, false, &Filter::default()).len(), 4);
     }
 
     #[test]
     fn typo_tolerant_on_filenames() {
-        let hits = index().search("fatby", 10, Sort::Relevance, false);
+        let hits = index().search("fatby", 10, Sort::Relevance, false, &Filter::default());
         assert_eq!(hits[0].id, 4, "fuzzy match should survive a dropped letter");
     }
 
     #[test]
     fn folder_match_pulls_in_contents() {
-        let hits = index().search("fart", 10, Sort::Relevance, false);
+        let hits = index().search("fart", 10, Sort::Relevance, false, &Filter::default());
         let ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
         assert!(ids.contains(&1) && ids.contains(&2), "both files in SFX/Farts, got {ids:?}");
         assert!(hits.iter().filter(|h| h.id == 1 || h.id == 2).all(|h| h.via_folder));
@@ -219,13 +305,13 @@ mod tests {
             item(1, "Music", "impact.wav"),
             item(2, "SFX/Impacts/Metal", "clang.wav"),
         ]);
-        let hits = ix.search("impact", 10, Sort::Relevance, false);
+        let hits = ix.search("impact", 10, Sort::Relevance, false, &Filter::default());
         assert_eq!(hits[0].id, 1, "direct filename hit should win");
     }
 
     #[test]
     fn highlight_indices_point_into_the_filename() {
-        let hits = index().search("hit", 10, Sort::Relevance, false);
+        let hits = index().search("hit", 10, Sort::Relevance, false, &Filter::default());
         let h = hits.iter().find(|h| h.id == 3).expect("hit_03.wav should match");
         assert_eq!(h.indices, vec![0, 1, 2]);
     }

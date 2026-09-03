@@ -317,3 +317,83 @@
   color: var(--fg-faint);
   z-index: 1;
 }
+
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.zoom button {
+  padding: 1px 7px;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+
+.tagbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+.star {
+  background: none;
+  border-color: transparent;
+  color: var(--fg-faint);
+  padding: 0 4px;
+  font-size: var(--fs-lg);
+}
+.star.on {
+  color: var(--sel);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.chip button {
+  background: none;
+  border: none;
+  color: var(--fg-faint);
+  padding: 0 2px;
+  font-size: var(--fs-sm);
+}
+.chip button:hover {
+  color: var(--bad);
+}
+.taginput {
+  width: 80px;
+  padding: 2px 6px;
+  font-size: var(--fs-sm);
+}
+.tagrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 3px var(--sp-3);
+  cursor: pointer;
+  color: var(--fg-dim);
+}
+.tagrow:hover {
+  background: var(--row-hover);
+}
+.tagrow.on {
+  background: var(--row-sel);
+  color: var(--accent);
+}
+.tagname {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tagcount {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+}
