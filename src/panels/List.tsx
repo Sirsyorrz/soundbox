@@ -28,8 +28,6 @@ const COLUMNS: Column[] = [
   { key: "folder", label: "Folder", width: "minmax(80px, 1fr)" },
   { key: "duration", label: "Dur", width: "56px", align: "right" },
   { key: "modified", label: "Date", width: "84px", align: "right" },
-  { key: "added", label: "Added", width: "84px", align: "right" },
-  { key: "recent", label: "Played", width: "84px", align: "right" },
 ];
 
 const GRID = COLUMNS.map((c) => c.width).join(" ");
@@ -216,8 +214,6 @@ export function List() {
                 </div>
                 <div className="td r num">{dur(item.duration_ms)}</div>
                 <div className="td r num">{date(item.mtime)}</div>
-                <div className="td r num">{date(item.added_at)}</div>
-                <div className="td r num">{date(item.last_played)}</div>
               </div>
             );
           })}
