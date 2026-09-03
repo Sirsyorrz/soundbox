@@ -3,11 +3,6 @@ name: release
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to publish, e.g. v0.1.0"
-        required: true
 
 jobs:
   release:
@@ -18,11 +13,9 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            bundles: nsis
-            artifact: src-tauri/target/release/bundle/nsis/*-setup.exe
+            args: --bundles nsis
           - os: ubuntu-22.04
-            bundles: appimage
-            artifact: src-tauri/target/release/bundle/appimage/*.AppImage
+            args: --bundles appimage
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -44,24 +37,24 @@ jobs:
           cache: npm
       - run: npm ci
 
-      - name: Bundle
-        run: npx tauri build --bundles ${{ matrix.bundles }}
-
-      - uses: softprops/action-gh-release@v2
+      # Also writes latest.json, which is what installed copies poll to find
+      # out an update exists.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: SoundBox ${{ github.event.inputs.tag || github.ref_name }}
-          draft: false
+          tagName: ${{ github.ref_name }}
+          releaseName: SoundBox ${{ github.ref_name }}
+          releaseBody: |
+            Installed copies will offer this automatically. Otherwise download below.
+
+            **Windows:** the `-setup.exe`. Unsigned, so SmartScreen warns:
+            "More info" then "Run anyway".
+
+            **Linux:** the `.AppImage`, `chmod +x`, run.
+          releaseDraft: false
           prerelease: true
-          fail_on_unmatched_files: true
-          files: ${{ matrix.artifact }}
-          body: |
-            Early test build. Windows is unproven at runtime, so expect rough edges.
-
-            **Windows:** download the `-setup.exe`. SmartScreen will warn because the
-            binary is unsigned - "More info" then "Run anyway".
-
-            **Linux:** download the `.AppImage`, `chmod +x` it, and run it.
-
-            Please report: whether audio plays, whether dragging a sound into your
-            editor works, and anything that looks wrong.
+          includeUpdaterJson: true
+          args: ${{ matrix.args }}

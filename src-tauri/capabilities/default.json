@@ -2,6 +2,14 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "soundbox capabilities",
-  "windows": ["main"],
-  "permissions": ["core:default", "dialog:default", "drag:default"]
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "drag:default",
+    "updater:default",
+    "process:allow-restart"
+  ]
 }

@@ -70,6 +70,7 @@ interface State {
   setLayout: (l: LayoutName) => void;
   addFolder: () => Promise<void>;
   registry: Registry | null;
+  updateNonce: number;
   loadProfiles: () => Promise<void>;
   switchProfile: (id: string) => Promise<void>;
   createProfile: (name: string) => Promise<void>;
@@ -94,6 +95,7 @@ export const useStore = create<State>((set, get) => ({
   normalise: true,
   volume: 1,
   registry: null,
+  updateNonce: 0,
   sort: "relevance",
   desc: false,
   rowH: 26,

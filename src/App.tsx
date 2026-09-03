@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "./state/store";
@@ -8,6 +8,7 @@ import { List } from "./panels/List";
 import { Similar } from "./panels/Similar";
 import { RenameBox, TagEditor, TagRail } from "./panels/Tags";
 import { Splitter, useSplitters } from "./panels/Splitter";
+import { Updater } from "./panels/Updater";
 import "./app.css";
 
 function Search() {
@@ -230,16 +231,27 @@ function Profiles() {
           Import
         </button>
       </div>
+      <div className="profile-actions">
+        <button
+          title="Check GitHub for a newer version"
+          onClick={() => useStore.setState((v) => ({ updateNonce: v.updateNonce + 1 }))}
+        >
+          Check for updates
+        </button>
+      </div>
     </>
   );
 }
 
 function Status() {
+  const nonce = useStore((s) => s.updateNonce);
+  const [checked, setChecked] = useState(0);
   const message = useStore((s) => s.message);
   const device = useStore((s) => s.device);
   const scanning = useStore((s) => s.scanning);
   return (
     <div className="status">
+      <Updater manual={nonce > checked} onDone={() => setChecked(nonce)} />
       <span>{scanning ? `scanning ${scanning.done}/${scanning.total}` : message}</span>
       <span className="spacer" />
       <span className="dim">{device}</span>

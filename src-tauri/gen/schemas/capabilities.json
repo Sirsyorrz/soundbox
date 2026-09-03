@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"soundbox capabilities","local":true,"windows":["main"],"permissions":["core:default","dialog:default","drag:default"]}}
+{"default":{"identifier":"default","description":"soundbox capabilities","local":true,"windows":["main"],"permissions":["core:default","dialog:default","drag:default","updater:default","process:allow-restart"]}}

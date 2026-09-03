@@ -1,6 +1,6 @@
 [package]
 name = "soundbox"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 # The crate ships a CLI too, so bundling needs to be told which one is the app.
 default-run = "soundbox-app"
@@ -46,3 +46,5 @@ rustfft = "6.4.1"
 cpal = "0.15"
 nucleo-matcher = "0.3.1"
 flate2 = "1.1.10"
+tauri-plugin-updater = "2.11.0"
+tauri-plugin-process = "2.3.1"
