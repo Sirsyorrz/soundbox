@@ -18,6 +18,11 @@ path = "src/bin/app.rs"
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# Tauri serves devUrl unless this is on, in which case it serves the embedded
+# frontendDist. The Tauri CLI passes it for builds; plain `cargo build` will not.
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
