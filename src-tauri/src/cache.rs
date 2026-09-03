@@ -5,9 +5,13 @@ use anyhow::{anyhow, Result};
 
 const MAGIC: &[u8; 4] = b"SBPK";
 /// Bump to invalidate every cached blob without a schema migration.
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
 /// Coarse level: ~10 KB per 3-minute stereo file.
 pub const BUCKET_SAMPLES: usize = 2048;
+/// Floor on bucket count so short sounds still have a drawable sparkline.
+/// At 2048 samples/bucket a 0.3 s clip is only 6 buckets, which renders as a
+/// handful of blocks. Costs nothing: short files are small either way.
+pub const MIN_BUCKETS: usize = 128;
 
 pub struct Peaks {
     pub sample_rate: u32,
@@ -29,6 +33,42 @@ impl Peaks {
                 ch.iter()
                     .map(|(lo, hi)| (*lo as f32 / i16::MAX as f32, *hi as f32 / i16::MAX as f32))
                     .collect()
+            })
+            .collect()
+    }
+}
+
+impl Peaks {
+    /// Channel-summed min/max at an arbitrary width, for row sparklines.
+    ///
+    /// Summing rather than taking channel 0 avoids a hard-panned sound looking
+    /// silent in the list.
+    pub fn mono_downsample(&self, width: usize) -> Vec<(f32, f32)> {
+        let src = self.buckets();
+        if src == 0 || width == 0 {
+            return Vec::new();
+        }
+        let width = width.min(src);
+        let per = src as f64 / width as f64;
+        let scale = 1.0 / i16::MAX as f32;
+
+        (0..width)
+            .map(|b| {
+                let start = (b as f64 * per) as usize;
+                let end = (((b + 1) as f64 * per) as usize).clamp(start + 1, src);
+                let mut lo = 0i16;
+                let mut hi = 0i16;
+                for ch in &self.data {
+                    for s in &ch[start..end] {
+                        if s.0 < lo {
+                            lo = s.0;
+                        }
+                        if s.1 > hi {
+                            hi = s.1;
+                        }
+                    }
+                }
+                (lo as f32 * scale, hi as f32 * scale)
             })
             .collect()
     }
@@ -119,7 +159,8 @@ pub fn read(cache_dir: &Path, content_key: &str) -> Result<Peaks> {
 }
 
 pub fn build(d: &crate::audio::Decoded) -> Peaks {
-    build_n(d, d.frames().div_ceil(BUCKET_SAMPLES).max(1))
+    let frames = d.frames();
+    build_n(d, frames.div_ceil(BUCKET_SAMPLES).max(1).max(MIN_BUCKETS.min(frames)))
 }
 
 /// Peaks at an explicit resolution, for the detail view.
@@ -218,6 +259,37 @@ mod tests {
         let mut b = encode(&build(&synth(2, 4096)));
         b[4] = 99;
         assert!(decode(&b).is_err());
+    }
+
+    #[test]
+    fn mono_downsample_sums_channels_and_hits_width() {
+        // Silent left, loud right: taking channel 0 would look like silence.
+        let frames = 8192;
+        let samples = (0..frames * 2)
+            .map(|i| if i % 2 == 0 { 0.0 } else { 0.8 })
+            .collect();
+        let d = Decoded { samples, channels: 2, sample_rate: 48000 };
+        let spark = build(&d).mono_downsample(50);
+        assert_eq!(spark.len(), 50);
+        assert!(spark.iter().any(|(_, hi)| *hi > 0.5), "right channel should show, got {spark:?}");
+    }
+
+    #[test]
+    fn short_files_still_get_a_drawable_sparkline() {
+        // 0.3 s at 44.1k is ~6 buckets without the floor.
+        let d = synth(1, 13_230);
+        assert!(build(&d).buckets() >= MIN_BUCKETS);
+        // Never more buckets than frames.
+        assert_eq!(build(&synth(1, 40)).buckets(), 40);
+    }
+
+    #[test]
+    fn mono_downsample_handles_degenerate_widths() {
+        let d = synth(2, 5000);
+        let p = build(&d);
+        assert!(p.mono_downsample(0).is_empty());
+        // Cannot invent more detail than the cache holds.
+        assert!(p.mono_downsample(10_000).len() <= p.buckets());
     }
 
     #[test]

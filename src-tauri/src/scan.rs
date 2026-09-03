@@ -50,7 +50,13 @@ enum Outcome {
     Row(Box<FileRow>),
 }
 
-fn analyse(root: &Path, root_id: i64, path: &Path, cache_dir: &Path, db_snapshot: Option<(u64, i64)>) -> Result<Outcome> {
+fn analyse(
+    root: &Path,
+    root_id: i64,
+    path: &Path,
+    cache_dir: &Path,
+    db_snapshot: Option<(u64, i64, u16)>,
+) -> Result<Outcome> {
     let meta = std::fs::metadata(path)?;
     let size = meta.len();
     let mtime = meta
@@ -60,8 +66,10 @@ fn analyse(root: &Path, root_id: i64, path: &Path, cache_dir: &Path, db_snapshot
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
-    if let Some((s, m)) = db_snapshot {
-        if s == size && m == mtime {
+    // A cache version bump must force re-analysis even when the file itself is
+    // untouched, or stale blobs survive forever and the UI silently gets nothing.
+    if let Some((s, m, rev)) = db_snapshot {
+        if s == size && m == mtime && rev == crate::cache::VERSION {
             return Ok(Outcome::Skipped);
         }
     }
@@ -131,7 +139,7 @@ where
 
     // Read the existing index up front: SQLite reads from many rayon threads
     // would serialise on the connection lock anyway.
-    let snapshots: Vec<Option<(u64, i64)>> = files
+    let snapshots: Vec<Option<(u64, i64, u16)>> = files
         .iter()
         .map(|p| {
             let rel = p.strip_prefix(root).unwrap_or(p).to_string_lossy().to_string();

@@ -132,14 +132,14 @@ impl Db {
         Ok(rows)
     }
 
-    /// Returns (size, mtime) for a known location, used to skip unchanged files.
-    pub fn known(&self, root_id: i64, rel_path: &str) -> Result<Option<(u64, i64)>> {
+    /// (size, mtime, peaks_rev) for a known location, used to skip unchanged files.
+    pub fn known(&self, root_id: i64, rel_path: &str) -> Result<Option<(u64, i64, u16)>> {
         let r = self
             .conn
             .query_row(
-                "SELECT size, mtime FROM files WHERE root_id = ?1 AND rel_path = ?2",
+                "SELECT size, mtime, peaks_rev FROM files WHERE root_id = ?1 AND rel_path = ?2",
                 params![root_id, rel_path],
-                |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)?)),
+                |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)?, r.get::<_, i64>(2)? as u16)),
             )
             .optional()?;
         Ok(r)
@@ -253,6 +253,20 @@ impl Db {
             params![id, now()],
         )?;
         Ok(())
+    }
+
+    /// (id, content_key, duration_ms, feature blob) for the similarity index.
+    pub fn all_features(&self) -> Result<Vec<(i64, String, u64, Vec<u8>)>> {
+        let mut st = self.conn.prepare(
+            "SELECT id, content_key, duration_ms, features FROM files
+             WHERE status = 'ok' AND features IS NOT NULL AND LENGTH(features) > 0",
+        )?;
+        let rows = st
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u64, r.get(3)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     pub fn count(&self) -> Result<i64> {
