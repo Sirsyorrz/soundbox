@@ -55,6 +55,6 @@ jobs:
 
             **Linux:** the `.AppImage`, `chmod +x`, run.
           releaseDraft: false
-          prerelease: true
+          prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
