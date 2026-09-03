@@ -109,10 +109,11 @@ export function TagRail() {
         <span>★ Favourites</span>
       </div>
       {tags.length === 0 && <div className="dim pad">no tags yet</div>}
-      {tags.map(([name, count]) => (
+      {tags.map(([name, count, isUser]) => (
         <div
           key={name}
-          className={"tagrow" + (filter.tag === name ? " on" : "")}
+          className={"tagrow" + (filter.tag === name ? " on" : "") + (isUser ? "" : " derived")}
+          title={isUser ? undefined : `Folder name: every sound under ${name}`}
           onClick={() => void setFilter({ ...filter, tag: filter.tag === name ? null : name })}
         >
           <span className="tagname">{name}</span>

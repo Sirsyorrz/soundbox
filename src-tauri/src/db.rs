@@ -552,6 +552,20 @@ impl Db {
         }
     }
 
+    /// Removes every user-authored tag. Folder tags are derived from paths and
+    /// are unaffected. Returns (tags removed, sounds affected).
+    pub fn clear_tags(&self) -> Result<(usize, usize)> {
+        let sounds: usize =
+            self.conn.query_row("SELECT COUNT(DISTINCT content_key) FROM file_tags", [], |r| {
+                r.get::<_, i64>(0)
+            })? as usize;
+        let tags: usize =
+            self.conn.query_row("SELECT COUNT(*) FROM tags", [], |r| r.get::<_, i64>(0))? as usize;
+        self.conn.execute("DELETE FROM file_tags", [])?;
+        self.conn.execute("DELETE FROM tags", [])?;
+        Ok((tags, sounds))
+    }
+
     pub fn all_content_keys(&self) -> Result<Vec<String>> {
         let mut st = self.conn.prepare("SELECT DISTINCT content_key FROM files")?;
         let rows = st.query_map([], |r| r.get(0))?.collect::<Result<Vec<_>, _>>()?;
@@ -648,6 +662,22 @@ mod tests {
         let counts = db.tag_counts().unwrap();
         assert!(!counts.iter().any(|(n, _)| n == "whoosh"), "nothing uses it now");
         assert!(counts.iter().any(|(n, _)| n == "metal"), "other tags are untouched");
+    }
+
+    #[test]
+    fn clearing_tags_leaves_favourites_and_folder_tags_alone() {
+        let db = db_with(&["a.wav", "b.wav"]);
+        db.tag_file(id_of(&db, "a.wav"), "whoosh").unwrap();
+        db.tag_file(id_of(&db, "b.wav"), "metal").unwrap();
+        db.toggle_favorite(id_of(&db, "a.wav")).unwrap();
+
+        let (tags, sounds) = db.clear_tags().unwrap();
+        assert_eq!((tags, sounds), (2, 2));
+        assert!(db.tag_counts().unwrap().is_empty());
+
+        let item = db.all_items().unwrap().into_iter().find(|i| i.filename == "a.wav").unwrap();
+        assert!(item.favorite, "favourites are not tags");
+        assert_eq!(item.tags, vec!["sub"], "folder tags come from the path, not the table");
     }
 
     #[test]

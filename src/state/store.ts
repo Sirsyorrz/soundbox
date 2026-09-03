@@ -26,7 +26,7 @@ interface State {
   rowH: number;
   similarGate: boolean;
   roots: Root[];
-  tags: [string, number][];
+  tags: [string, number, boolean][];
   filter: Filter;
   librarySize: number;
   scanning: { done: number; total: number } | null;
@@ -83,6 +83,7 @@ interface State {
   setShowFailed: (v: boolean) => void;
   cancelScan: () => void;
   pruneCache: () => Promise<void>;
+  clearTags: () => Promise<void>;
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;
   showShortcuts: boolean;
@@ -289,6 +290,24 @@ export const useStore = create<State>((set, get) => ({
     set({ message: "stopping scan…" });
   },
 
+  clearTags: async () => {
+    const userTags = get().tags.filter(([, , isUser]) => isUser);
+    if (userTags.length === 0) {
+      set({ message: "no tags to clear" });
+      return;
+    }
+    try {
+      const [tags, sounds] = await invoke<[number, number]>("clear_tags");
+      set({
+        message: `cleared ${tags} tag${tags === 1 ? "" : "s"} from ${sounds} sound${sounds === 1 ? "" : "s"}`,
+      });
+      await get().loadTags();
+      await get().refresh();
+    } catch (e) {
+      set({ message: `could not clear tags: ${e}` });
+    }
+  },
+
   pruneCache: async () => {
     const r = await invoke<{ removed: number; bytes: number }>("prune_cache");
     const mb = (r.bytes / 1048576).toFixed(1);
@@ -300,7 +319,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   loadTags: async () => {
-    const tags = await invoke<[string, number][]>("tags");
+    const tags = await invoke<[string, number, boolean][]>("tags");
     // Filtering by a tag that no longer exists would show an empty list with
     // no obvious way back.
     const { filter } = get();

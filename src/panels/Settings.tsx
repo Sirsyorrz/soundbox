@@ -6,6 +6,9 @@ export function Settings() {
   const close = () => useStore.getState().setShowSettings(false);
   const pruneCache = useStore((s) => s.pruneCache);
   const setShowShortcuts = useStore((s) => s.setShowShortcuts);
+  const clearTags = useStore((s) => s.clearTags);
+  const exportPack = useStore((s) => s.exportPack);
+  const userTags = useStore((s) => s.tags.filter(([, , isUser]) => isUser));
 
   if (!open) return null;
 
@@ -45,6 +48,44 @@ export function Settings() {
               </div>
             </div>
             <button onClick={() => void pruneCache()}>Clean</button>
+          </div>
+
+          <div className="sidebar-h">Tags</div>
+          <div className="setrow danger">
+            <div className="setlabel">
+              Clear all tags
+              <div className="dim">
+                Removes every tag you have added, from every sound in this profile.
+                Favourites and folder names are not affected. This cannot be undone.
+              </div>
+            </div>
+            <button
+              className="danger"
+              disabled={userTags.length === 0}
+              onClick={async () => {
+                const names = userTags.map(([n]) => n);
+                const preview = names.slice(0, 8).join(", ");
+                const more = names.length > 8 ? `, and ${names.length - 8} more` : "";
+                if (
+                  !confirm(
+                    `Clear ${names.length} tags from this profile?\n\n${preview}${more}\n\n` +
+                      `Favourites and folder names are kept. This cannot be undone.`,
+                  )
+                )
+                  return;
+                // Offer the one route back before doing something irreversible.
+                if (
+                  confirm("Save a copy of these tags to a file first?\n\nRecommended.")
+                ) {
+                  await exportPack();
+                }
+                if (!confirm("Last chance. Clear all tags now?")) return;
+                await clearTags();
+                close();
+              }}
+            >
+              Clear…
+            </button>
           </div>
 
           <div className="sidebar-h">Updates</div>

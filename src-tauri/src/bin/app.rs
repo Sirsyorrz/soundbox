@@ -359,18 +359,29 @@ async fn untag_file(state: State<'_, App>, id: i64, tag: String) -> Result<(), S
     reload_index(&state).map(|_| ())
 }
 
-/// Counts come from the index, so folder-derived tags are included alongside
-/// the user's own.
+/// (name, count, user-authored). Counts come from the index so folder-derived
+/// tags are included, but they are flagged: only the user's own can be edited
+/// or cleared.
 #[tauri::command]
-fn tags(state: State<'_, App>) -> Vec<(String, i64)> {
+fn tags(state: State<'_, App>) -> Vec<(String, i64, bool)> {
     let ix = state.index.lock().unwrap();
     let mut counts: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
+    let mut derived: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for item in ix.items() {
         for t in &item.tags {
             *counts.entry(t.as_str()).or_default() += 1;
         }
+        for t in &item.folder_tags {
+            derived.insert(t.as_str());
+        }
     }
-    let mut out: Vec<(String, i64)> = counts.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    let mut out: Vec<(String, i64, bool)> = counts
+        .into_iter()
+        .map(|(k, v)| {
+            let is_user = !derived.contains(k);
+            (k.to_string(), v, is_user)
+        })
+        .collect();
     out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     out
 }
@@ -400,6 +411,16 @@ async fn prune_cache(state: State<'_, App>) -> Result<cache::Pruned, String> {
     }
 
     cache::prune(&state.base, &keep).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn clear_tags(state: State<'_, App>) -> Result<(usize, usize), String> {
+    let counts = {
+        let db = state.db.lock().unwrap();
+        db.clear_tags().map_err(|e| e.to_string())?
+    };
+    reload_index(&state)?;
+    Ok(counts)
 }
 
 #[tauri::command]
@@ -735,6 +756,7 @@ fn main() {
             tags,
             prune_cache,
             cancel_scan,
+            clear_tags,
             failed_files,
             similar,
             sparklines,
