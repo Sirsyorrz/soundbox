@@ -8,7 +8,11 @@ use walkdir::WalkDir;
 use crate::db::{Db, FileRow};
 use crate::{analysis, audio, cache, ident};
 
-pub const AUDIO_EXTS: &[&str] = &["wav", "flac", "mp3", "ogg", "oga", "opus", "m4a", "aac", "alac"];
+/// mp4 and its relatives are video containers, but the audio track decodes the
+/// same way and clips are often filed as mp4.
+pub const AUDIO_EXTS: &[&str] = &[
+    "wav", "flac", "mp3", "ogg", "oga", "opus", "m4a", "aac", "alac", "mp4", "m4v", "mov",
+];
 
 #[derive(Debug, Default, Clone)]
 pub struct ScanStats {
