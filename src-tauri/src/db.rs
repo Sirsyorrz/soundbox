@@ -245,7 +245,21 @@ impl Db {
                     mtime: r.get(9)?,
                     last_played: r.get(10)?,
                     favorite: r.get(11)?,
-                    tags: r.get::<_, String>(12)?.split_whitespace().map(str::to_string).collect(),
+                    tags: {
+                        // Folder names are tags as far as the UI is concerned; the
+                        // derived list stays separate so they cannot be un-tagged.
+                        let mut t: Vec<String> = r
+                            .get::<_, String>(12)?
+                            .split_whitespace()
+                            .map(str::to_string)
+                            .collect();
+                        for f in &folder_tags {
+                            if !t.contains(f) {
+                                t.push(f.clone());
+                            }
+                        }
+                        t
+                    },
                     folder_tags,
                 })
             })?

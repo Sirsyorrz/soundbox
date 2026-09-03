@@ -499,12 +499,9 @@ body.row-resize * {
   font-size: var(--fs-sm);
 }
 
-.tagrow.folder .tagname::before {
-  content: "▸ ";
-  color: var(--fg-faint);
-}
-.tagrow.more {
-  font-size: var(--fs-sm);
+.chip.derived {
+  border-style: dashed;
+  color: var(--fg-dim);
 }
 
 .modal-back {

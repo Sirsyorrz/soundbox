@@ -11,6 +11,7 @@ export interface Item {
   last_played: number;
   favorite: boolean;
   tags: string[];
+  folder_tags: string[];
 }
 
 export interface Filter {

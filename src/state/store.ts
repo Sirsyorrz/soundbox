@@ -73,8 +73,6 @@ interface State {
   addFolder: () => Promise<void>;
   registry: Registry | null;
   updateNonce: number;
-  folderTags: [string, number][];
-  loadFolderTags: () => Promise<void>;
   keymap: Keymap;
   setBinding: (id: string, combos: string[]) => void;
   resetBinding: (id: string) => void;
@@ -108,7 +106,6 @@ export const useStore = create<State>((set, get) => ({
   volume: SAVED.volume,
   registry: null,
   updateNonce: 0,
-  folderTags: [],
   keymap: SAVED.keymap,
   showShortcuts: false,
   sort: SAVED.sort,
@@ -244,10 +241,6 @@ export const useStore = create<State>((set, get) => ({
     await invoke("untag_file", { id, tag });
     await get().loadTags();
     await get().refresh();
-  },
-
-  loadFolderTags: async () => {
-    set({ folderTags: await invoke<[string, number][]>("folder_tags") });
   },
 
   setBinding: (id, combos) => {
@@ -388,7 +381,6 @@ export const useStore = create<State>((set, get) => ({
     await invoke("remove_root", { id });
     set({ selected: -1, current: null, region: null });
     await get().loadRoots();
-    await get().loadFolderTags();
     await get().refresh();
   },
 
@@ -398,7 +390,6 @@ export const useStore = create<State>((set, get) => ({
       const n = await invoke<number>("rescan_root", { id });
       clearSparks();
       set({ message: `${n} sounds indexed` });
-      await get().loadFolderTags();
       await get().refresh();
     } catch (e) {
       set({ message: `rescan failed: ${e}` });
@@ -418,7 +409,6 @@ export const useStore = create<State>((set, get) => ({
       clearSparks();
       set({ message: `indexed ${n} files` });
       await get().loadRoots();
-      await get().loadFolderTags();
       await get().refresh();
       // A pack shipped with the sounds is the whole point of packs.
       const found = await invoke<string | null>("pack_in_root", { path: dir });
@@ -441,7 +431,6 @@ export const useStore = create<State>((set, get) => ({
     await get().loadProfiles();
     await get().loadRoots();
     await get().loadTags();
-    await get().loadFolderTags();
     clearSparks();
     set({ query: "", selected: -1, current: null, message: `${n} sounds` });
     await get().refresh();

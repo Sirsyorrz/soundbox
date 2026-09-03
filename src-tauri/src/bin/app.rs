@@ -324,19 +324,15 @@ async fn untag_file(state: State<'_, App>, id: i64, tag: String) -> Result<(), S
     reload_index(&state).map(|_| ())
 }
 
+/// Counts come from the index, so folder-derived tags are included alongside
+/// the user's own.
 #[tauri::command]
-fn tags(state: State<'_, App>) -> Result<Vec<(String, i64)>, String> {
-    state.db.lock().unwrap().tag_counts().map_err(|e| e.to_string())
-}
-
-/// Derived from paths, so it comes from the index rather than the database.
-#[tauri::command]
-fn folder_tags(state: State<'_, App>) -> Vec<(String, i64)> {
+fn tags(state: State<'_, App>) -> Vec<(String, i64)> {
     let ix = state.index.lock().unwrap();
     let mut counts: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
     for item in ix.items() {
-        for f in &item.folder_tags {
-            *counts.entry(f.as_str()).or_default() += 1;
+        for t in &item.tags {
+            *counts.entry(t.as_str()).or_default() += 1;
         }
     }
     let mut out: Vec<(String, i64)> = counts.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
@@ -664,7 +660,6 @@ fn main() {
             tag_file,
             untag_file,
             tags,
-            folder_tags,
             similar,
             sparklines,
             load,

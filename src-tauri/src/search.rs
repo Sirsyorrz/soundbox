@@ -24,8 +24,8 @@ pub struct Item {
     pub last_played: i64,
     pub favorite: bool,
     pub tags: Vec<String>,
-    /// Each directory between the library root and the file, usable as a filter.
-    /// Derived from the path, never stored, so moving a file re-derives them.
+    /// The subset of `tags` that came from the path rather than the user. They
+    /// are not stored, so they cannot be removed and never travel in a pack.
     pub folder_tags: Vec<String>,
 }
 
@@ -44,8 +44,7 @@ impl Filter {
             return false;
         }
         match &self.tag {
-            // One rail lists both, so a filter click matches either kind.
-            Some(t) => i.tags.iter().any(|x| x == t) || i.folder_tags.iter().any(|x| x == t),
+            Some(t) => i.tags.iter().any(|x| x == t),
             None => true,
         }
     }
@@ -148,9 +147,13 @@ impl Index {
             let name_score =
                 pat.indices(Utf32Str::new(&item.filename, &mut buf), matcher, &mut idx_buf);
             let folder_score = folder_scores.get(item.folder.as_str()).copied();
+            // Folder-derived tags are excluded here: the folder path is already
+            // its own haystack, and counting them twice would both inflate the
+            // score and bypass folder expansion.
             let tag_score = item
                 .tags
                 .iter()
+                .filter(|t| !item.folder_tags.contains(t))
                 .filter_map(|t| {
                     buf.clear();
                     pat.score(Utf32Str::new(t, &mut buf), matcher)
@@ -235,7 +238,8 @@ mod tests {
             mtime: id,
             last_played: 0,
             favorite: false,
-            tags: Vec::new(),
+            // Mirrors the database, which merges folder names into the tag list.
+            tags: folder.split('/').filter(|s| !s.is_empty()).map(str::to_string).collect(),
             folder_tags: folder.split('/').filter(|s| !s.is_empty()).map(str::to_string).collect(),
         }
     }

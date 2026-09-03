@@ -267,7 +267,6 @@ export default function App() {
     void useStore.getState().loadRoots();
     void useStore.getState().loadProfiles();
     void useStore.getState().loadTags();
-    void useStore.getState().loadFolderTags();
     // The store restored these from disk; the audio thread has not seen them.
     void invoke("set_volume", { volume: useStore.getState().volume });
     void invoke("set_looping", { looping: useStore.getState().looping });

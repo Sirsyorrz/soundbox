@@ -205,6 +205,15 @@ mod tests {
         db.all_items().unwrap().into_iter().find(|i| i.filename == name).unwrap().id
     }
 
+    /// Tags the user actually chose, without the folder-derived ones.
+    fn user_tags(db: &Db) -> Vec<String> {
+        let item = db.all_items().unwrap().remove(0);
+        let mut t: Vec<String> =
+            item.tags.into_iter().filter(|x| !item.folder_tags.contains(x)).collect();
+        t.sort();
+        t
+    }
+
     #[test]
     fn export_only_includes_sounds_with_metadata() {
         let db = db_with(&[("k1", "a.wav", 10), ("k2", "b.wav", 20), ("k3", "c.wav", 30)]);
@@ -215,6 +224,17 @@ mod tests {
         let keys: Vec<&str> = pack.entries.iter().map(|e| e.content_key.as_str()).collect();
         assert_eq!(keys.len(), 2, "the untagged sound should not be exported");
         assert!(keys.contains(&"k1") && keys.contains(&"k2"));
+    }
+
+    #[test]
+    fn folder_tags_do_not_travel_in_a_pack() {
+        // They belong to whatever machine holds the files, not to the sound.
+        let db = db_with(&[("k1", "a.wav", 10)]);
+        db.toggle_favorite(id_of(&db, "a.wav")).unwrap();
+        assert!(db.all_items().unwrap()[0].tags.contains(&"sub".to_string()));
+
+        let pack = export(&db, "Test").unwrap();
+        assert!(pack.entries[0].tags.is_empty(), "only user-authored tags are exported");
     }
 
     #[test]
@@ -244,8 +264,7 @@ mod tests {
         let r = import(&mine, &pack, Mode::Merge, false).unwrap();
         assert_eq!((r.exact, r.fuzzy, r.missing), (1, 0, 0));
 
-        let item = mine.all_items().unwrap().remove(0);
-        assert_eq!(item.tags, vec!["whoosh"]);
+        assert_eq!(user_tags(&mine), vec!["whoosh"]);
     }
 
     #[test]
@@ -261,11 +280,11 @@ mod tests {
 
         let skipped = import(&mine, &pack, Mode::Merge, false).unwrap();
         assert_eq!(skipped.missing, 1, "fuzzy matches must not apply unless asked");
-        assert!(mine.all_items().unwrap()[0].tags.is_empty());
+        assert!(user_tags(&mine).is_empty());
 
         let applied = import(&mine, &pack, Mode::Merge, true).unwrap();
         assert_eq!(applied.fuzzy, 1);
-        assert_eq!(mine.all_items().unwrap()[0].tags, vec!["boom"]);
+        assert_eq!(user_tags(&mine), vec!["boom"]);
     }
 
     #[test]
@@ -279,11 +298,8 @@ mod tests {
         mine.toggle_favorite(id_of(&mine, "a.wav")).unwrap();
 
         import(&mine, &pack, Mode::Merge, false).unwrap();
-        let item = mine.all_items().unwrap().remove(0);
-        let mut tags = item.tags.clone();
-        tags.sort();
-        assert_eq!(tags, vec!["mine", "theirs"], "merge is a union");
-        assert!(item.favorite, "merge must not clear a local favourite");
+        assert_eq!(user_tags(&mine), vec!["mine", "theirs"], "merge is a union");
+        assert!(mine.all_items().unwrap()[0].favorite, "merge must not clear a local favourite");
     }
 
     #[test]
@@ -297,9 +313,8 @@ mod tests {
         mine.toggle_favorite(id_of(&mine, "a.wav")).unwrap();
 
         import(&mine, &pack, Mode::Overwrite, false).unwrap();
-        let item = mine.all_items().unwrap().remove(0);
-        assert_eq!(item.tags, vec!["theirs"]);
-        assert!(!item.favorite, "the incoming entry was not a favourite");
+        assert_eq!(user_tags(&mine), vec!["theirs"]);
+        assert!(!mine.all_items().unwrap()[0].favorite, "the incoming entry was not a favourite");
     }
 
     #[test]
