@@ -227,7 +227,12 @@ export const useStore = create<State>((set, get) => ({
   },
 
   loadTags: async () => {
-    set({ tags: await invoke<[string, number][]>("tags") });
+    const tags = await invoke<[string, number][]>("tags");
+    // Filtering by a tag that no longer exists would show an empty list with
+    // no obvious way back.
+    const { filter } = get();
+    const stale = filter.tag && !tags.some(([name]) => name === filter.tag);
+    set(stale ? { tags, filter: { ...filter, tag: null } } : { tags });
   },
 
   setFilter: async (filter) => {

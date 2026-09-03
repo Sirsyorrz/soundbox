@@ -354,15 +354,23 @@ impl Db {
              AND tag_id = (SELECT id FROM tags WHERE name = ?2)",
             params![key, tag],
         )?;
+        // A tag nothing is filed under is just clutter in the filter rail.
+        self.conn.execute(
+            "DELETE FROM tags WHERE name = ?1
+             AND NOT EXISTS (SELECT 1 FROM file_tags WHERE tag_id = tags.id)",
+            params![tag],
+        )?;
         Ok(())
     }
 
     /// (name, number of files carrying it), commonest first.
     pub fn tag_counts(&self) -> Result<Vec<(String, i64)>> {
         let mut st = self.conn.prepare(
+            // Inner join, so a tag row that exists only to carry a colour from an
+            // imported pack does not show up as an empty filter.
             "SELECT t.name, COUNT(ft.content_key) c FROM tags t
-             LEFT JOIN file_tags ft ON ft.tag_id = t.id
-             GROUP BY t.id ORDER BY c DESC, t.name",
+             JOIN file_tags ft ON ft.tag_id = t.id
+             GROUP BY t.id HAVING c > 0 ORDER BY c DESC, t.name",
         )?;
         let rows =
             st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
@@ -549,4 +557,67 @@ pub fn now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db_with(names: &[&str]) -> Db {
+        let db = Db::open_in_memory().unwrap();
+        let root = db.add_root(Path::new("/lib"), "lib").unwrap();
+        for (i, name) in names.iter().enumerate() {
+            db.upsert(&FileRow {
+                content_key: format!("key{i}"),
+                root_id: root,
+                rel_path: format!("sub/{name}"),
+                filename: name.to_string(),
+                ext: "wav".into(),
+                size: 10,
+                mtime: 0,
+                duration_ms: 1000,
+                sample_rate: 48000,
+                channels: 2,
+                lufs: None,
+                peak_db: -1.0,
+                features: Vec::new(),
+                status: "ok".into(),
+            })
+            .unwrap();
+        }
+        db
+    }
+
+    fn id_of(db: &Db, name: &str) -> i64 {
+        db.all_items().unwrap().into_iter().find(|i| i.filename == name).unwrap().id
+    }
+
+    #[test]
+    fn removing_the_last_use_of_a_tag_removes_the_tag() {
+        let db = db_with(&["a.wav", "b.wav"]);
+        db.tag_file(id_of(&db, "a.wav"), "whoosh").unwrap();
+        db.tag_file(id_of(&db, "b.wav"), "whoosh").unwrap();
+        db.tag_file(id_of(&db, "a.wav"), "metal").unwrap();
+
+        db.untag_file(id_of(&db, "a.wav"), "whoosh").unwrap();
+        let counts = db.tag_counts().unwrap();
+        assert!(
+            counts.iter().any(|(n, c)| n == "whoosh" && *c == 1),
+            "still used by b.wav, so it stays"
+        );
+
+        db.untag_file(id_of(&db, "b.wav"), "whoosh").unwrap();
+        let counts = db.tag_counts().unwrap();
+        assert!(!counts.iter().any(|(n, _)| n == "whoosh"), "nothing uses it now");
+        assert!(counts.iter().any(|(n, _)| n == "metal"), "other tags are untouched");
+    }
+
+    #[test]
+    fn a_colour_only_tag_is_not_offered_as_a_filter() {
+        // Importing a pack registers tag colours before anything is tagged.
+        let db = db_with(&["a.wav"]);
+        db.set_tag_color("unused", "#fff").unwrap();
+        assert!(db.tag_counts().unwrap().is_empty());
+        assert_eq!(db.tag_colors().unwrap().len(), 1, "the colour is still remembered");
+    }
 }
