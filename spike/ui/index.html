@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SoundBox Spike</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --line: #262d38;
+    --fg: #d7dee8; --dim: #7d8894; --accent: #4ea1ff; --sel: #ffcc4e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: grid;
+    grid-template-rows: auto 1fr auto; background: var(--bg); color: var(--fg);
+    font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; }
+  header { display: flex; gap: 8px; align-items: center;
+    padding: 8px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  input, button { background: #0b0e13; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 10px; font: inherit; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  #search { flex: 1; }
+  main { display: grid; grid-template-columns: 380px 1fr; min-height: 0; }
+  #list { overflow: auto; border-right: 1px solid var(--line); }
+  .row { padding: 6px 10px; border-bottom: 1px solid #1b212b; cursor: grab; }
+  .row:hover { background: #1a2029; }
+  .row.sel { background: #1d2937; }
+  .row .n { display: block; }
+  .row .f { color: var(--dim); font-size: 11px; }
+  #detail { display: flex; flex-direction: column; min-width: 0; padding: 10px; gap: 8px; }
+  #meta { color: var(--dim); }
+  #wave { flex: 1; width: 100%; background: #0b0e13;
+    border: 1px solid var(--line); border-radius: 6px; cursor: crosshair; }
+  footer { padding: 6px 10px; border-top: 1px solid var(--line);
+    background: var(--panel); color: var(--dim); font-size: 12px; }
+  .ok { color: #4ade80; } .bad { color: #f87171; }
+</style>
+</head>
+<body>
+<header>
+  <button id="pick">Pick folder…</button>
+  <input id="search" placeholder="filter… (substring, spike only)" />
+  <label><input type="checkbox" id="loop" /> loop</label>
+  <button id="stop">Stop</button>
+  <span id="dev"></span>
+</header>
+<main>
+  <div id="list"></div>
+  <div id="detail">
+    <div id="meta">no file loaded</div>
+    <canvas id="wave"></canvas>
+  </div>
+</main>
+<footer id="log">ready</footer>
+
+<script>
+const { invoke, Channel } = window.__TAURI__.core;
+const $ = (id) => document.getElementById(id);
+const log = (m, cls = "") => $("log").innerHTML = `<span class="${cls}">${m}</span>`;
+
+let all = [], shown = [], selIdx = -1, cur = null;
+let region = null;      // [startFrame, endFrame]
+let dragSel = null;
+const BUCKETS = 2000;
+
+$("pick").onclick = async () => {
+  const dir = await invoke("pick_folder");
+  if (!dir) return;
+  log("scanning…");
+  const t = performance.now();
+  all = await invoke("scan", { dir });
+  log(`scanned ${all.length} files in ${Math.round(performance.now() - t)} ms`, "ok");
+  render();
+};
+
+$("search").oninput = render;
+$("stop").onclick = () => invoke("stop");
+$("loop").onchange = (e) => invoke("set_loop", { looping: e.target.checked });
+
+function render() {
+  const q = $("search").value.toLowerCase();
+  shown = q ? all.filter(f => (f.folder + "/" + f.name).toLowerCase().includes(q)) : all;
+  const list = $("list");
+  list.innerHTML = "";
+  shown.slice(0, 2000).forEach((f, i) => {
+    const d = document.createElement("div");
+    d.className = "row" + (i === selIdx ? " sel" : "");
+    d.draggable = true;
+    d.innerHTML = `<span class="n"></span><span class="f"></span>`;
+    d.querySelector(".n").textContent = f.name;
+    d.querySelector(".f").textContent = f.folder || ".";
+    d.onclick = () => select(i);
+    d.ondragstart = (ev) => { ev.preventDefault(); startDrag(f); };
+    list.appendChild(d);
+  });
+}
+
+async function select(i) {
+  selIdx = i;
+  render();
+  const f = shown[i];
+  const t = performance.now();
+  try {
+    cur = await invoke("load", { path: f.path, buckets: BUCKETS });
+    region = [0, cur.frames];
+    draw();
+    $("meta").textContent =
+      `${f.name} — ${cur.sample_rate} Hz, ${cur.channels} ch, ` +
+      `${(cur.duration_ms / 1000).toFixed(2)} s, ${cur.frames} frames`;
+    log(`decoded + peaks in ${Math.round(performance.now() - t)} ms`, "ok");
+    invoke("play", { start: 0, end: cur.frames, looping: $("loop").checked });
+  } catch (e) {
+    log("decode failed: " + e, "bad");
+  }
+}
+
+// --- drag-out: the thing this spike exists to prove ---
+const DRAG_ICON =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKklEQVR42mNgGAWjYBSMglEwCkbBKBgFo2AUjIJRMApGwSgYBaNgFAxvAAAI8AAB0Y6l0QAAAABJRU5ErkJggg==";
+
+async function startDrag(f) {
+  const onEvent = new Channel();
+  onEvent.onmessage = (m) =>
+    log(`drag result: ${JSON.stringify(m)}`, m?.result === "Dropped" ? "ok" : "");
+  try {
+    // DragItem is an untagged enum: the Files variant is a bare array of paths.
+    await invoke("plugin:drag|start_drag", {
+      item: [f.path],
+      image: DRAG_ICON,
+      options: { mode: "copy" },
+      onEvent,
+    });
+    log(`drag started: ${f.name}`);
+  } catch (e) {
+    log("drag failed: " + e, "bad");
+  }
+}
+
+// --- waveform ---
+const cv = $("wave"), ctx = cv.getContext("2d");
+
+function draw(playPos = null) {
+  const dpr = devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!cur) return;
+
+  const chs = cur.peaks.length;
+  const lane = h / chs;
+
+  // selected region shading
+  if (region) {
+    ctx.fillStyle = "rgba(255,204,78,0.10)";
+    const x0 = region[0] / cur.frames * w, x1 = region[1] / cur.frames * w;
+    ctx.fillRect(x0, 0, x1 - x0, h);
+  }
+
+  cur.peaks.forEach((pk, c) => {
+    const top = c * lane, mid = top + lane / 2, amp = lane / 2 - 4;
+    ctx.strokeStyle = "#2a3441";
+    ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(w, mid); ctx.stroke();
+    ctx.strokeStyle = "#4ea1ff";
+    ctx.beginPath();
+    for (let x = 0; x < w; x++) {
+      const b = Math.min(pk.length - 1, Math.floor(x / w * pk.length));
+      const [lo, hi] = pk[b];
+      ctx.moveTo(x + 0.5, mid - hi * amp);
+      ctx.lineTo(x + 0.5, mid - lo * amp);
+    }
+    ctx.stroke();
+    if (c > 0) {
+      ctx.strokeStyle = "#262d38";
+      ctx.beginPath(); ctx.moveTo(0, top); ctx.lineTo(w, top); ctx.stroke();
+    }
+  });
+
+  if (playPos != null) {
+    const x = playPos / cur.frames * w;
+    ctx.strokeStyle = "#ffcc4e"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+}
+
+const frameAt = (ev) => {
+  const r = cv.getBoundingClientRect();
+  return Math.max(0, Math.min(cur.frames,
+    Math.round((ev.clientX - r.left) / r.width * cur.frames)));
+};
+
+cv.onmousedown = (ev) => { if (cur) dragSel = frameAt(ev); };
+cv.onmousemove = (ev) => {
+  if (dragSel == null || !cur) return;
+  const f = frameAt(ev);
+  region = [Math.min(dragSel, f), Math.max(dragSel, f)];
+  draw();
+};
+cv.onmouseup = (ev) => {
+  if (dragSel == null || !cur) return;
+  const f = frameAt(ev);
+  // A click (no drag) seeks and plays to the end; a drag defines a region.
+  region = Math.abs(f - dragSel) < 3 ? [f, cur.frames]
+                                     : [Math.min(dragSel, f), Math.max(dragSel, f)];
+  dragSel = null;
+  invoke("play", { start: region[0], end: region[1], looping: $("loop").checked });
+};
+
+addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.code === "Space") {
+    e.preventDefault();
+    if (cur) invoke("toggle_play").then(p => log(p ? "playing" : "paused"));
+  }
+  if (e.code === "ArrowDown" && selIdx < shown.length - 1) { e.preventDefault(); select(selIdx + 1); }
+  if (e.code === "ArrowUp" && selIdx > 0) { e.preventDefault(); select(selIdx - 1); }
+});
+
+addEventListener("resize", () => draw());
+
+setInterval(async () => {
+  const s = await invoke("status");
+  if (cur) draw(s.playing ? s.pos : null);
+}, 33);
+
+invoke("device_info").then(d => $("dev").textContent = d);
+</script>
+</body>
+</html>

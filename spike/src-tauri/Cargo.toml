@@ -1,0 +1,26 @@
+[package]
+name = "soundbox-spike"
+version = "0.0.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-drag = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+cpal = "0.15"
+# 0.5 rather than 0.6: 0.6's API is reworked and its own docs disclaim SemVer
+# stability. Cost: no AIFF support, revisit in Phase 1.
+symphonia = { version = "0.5", features = ["aac", "alac", "isomp4", "mp3"] }
+anyhow = "1"
+walkdir = "2"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

@@ -1,0 +1,27 @@
+[package]
+name = "soundbox"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "soundbox"
+path = "src/lib.rs"
+
+[[bin]]
+name = "soundbox-cli"
+path = "src/bin/cli.rs"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+blake3 = "1"
+walkdir = "2"
+rayon = "1"
+ebur128 = "0.1"
+# 0.5 rather than 0.6: 0.6's API is reworked and its own docs disclaim SemVer
+# stability. Cost: no AIFF support.
+symphonia = { version = "0.5", features = ["aac", "alac", "isomp4", "mp3"] }
+dirs = "6"
+thiserror = "2"
