@@ -17,13 +17,14 @@ export interface Layout {
 export const LAYOUTS = {
   default: {
     areas: `
-      "search  search  search"
-      "sidebar list    detail"
-      "sidebar list    similar"
-      "status  status  status"
+      "search  search search search search"
+      "sidebar gutA   list   gutB   right"
+      "status  status status status status"
     `,
-    columns: "var(--sidebar-w) var(--list-w) 1fr",
-    rows: "auto 1fr var(--similar-h) auto",
+    // Only the right column is flexible, so the waveform absorbs window
+    // resizing while the sidebar and list keep the widths the user set.
+    columns: "var(--sidebar-w) var(--gutter) var(--list-w) var(--gutter) 1fr",
+    rows: "auto 1fr auto",
   },
 } satisfies Record<string, Layout>;
 

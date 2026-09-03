@@ -7,6 +7,7 @@ import { Waveform } from "./panels/Waveform";
 import { List } from "./panels/List";
 import { Similar } from "./panels/Similar";
 import { RenameBox, TagEditor, TagRail } from "./panels/Tags";
+import { Splitter, useSplitters } from "./panels/Splitter";
 import "./app.css";
 
 function Search() {
@@ -190,6 +191,7 @@ function Status() {
 
 export default function App() {
   const layout = useStore((s) => s.layout);
+  useSplitters();
 
   useEffect(() => {
     void useStore.getState().refresh();
@@ -260,13 +262,14 @@ export default function App() {
       <div style={{ gridArea: "sidebar", minHeight: 0 }}>
         <Sidebar />
       </div>
-      <div style={{ gridArea: "list", minHeight: 0 }}>
+      <Splitter axis="x" varName="--sidebar-w" area="gutA" />
+      <div style={{ gridArea: "list", minHeight: 0, minWidth: 0 }}>
         <List />
       </div>
-      <div style={{ gridArea: "detail", minHeight: 0, minWidth: 0 }}>
+      <Splitter axis="x" varName="--list-w" area="gutB" />
+      <div className="rightcol" style={{ gridArea: "right" }}>
         <Detail />
-      </div>
-      <div style={{ gridArea: "similar", minHeight: 0 }}>
+        <Splitter axis="y" varName="--similar-h" invert />
         <Similar />
       </div>
       <div style={{ gridArea: "status" }}>

@@ -21,6 +21,20 @@ export function Waveform() {
   const ref = useRef<HTMLCanvasElement>(null);
   const drag = useRef<number | null>(null);
   const [peaks, setPeaks] = useState<[number, number][][]>([]);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+
+  // Resizing the panel changes how many buckets are worth fetching, and the
+  // canvas backing store has to be rebuilt at the new size.
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const r = entry.contentRect;
+      setSize({ w: Math.round(r.width), h: Math.round(r.height) });
+    });
+    ro.observe(cv);
+    return () => ro.disconnect();
+  }, []);
 
   // Peaks are fetched for the visible range only, so zooming in gains real
   // detail instead of stretching the full-file summary.
@@ -29,7 +43,7 @@ export function Waveform() {
       setPeaks([]);
       return;
     }
-    const width = Math.max(64, Math.round(ref.current?.clientWidth ?? 800));
+    const width = Math.max(64, size.w || Math.round(ref.current?.clientWidth ?? 800));
     let stale = false;
     const t = setTimeout(() => {
       void invoke<[number, number][][]>("peaks_range", {
@@ -44,7 +58,7 @@ export function Waveform() {
       stale = true;
       clearTimeout(t);
     };
-  }, [current, view]);
+  }, [current, view, size.w]);
 
   useEffect(() => {
     const cv = ref.current;
@@ -147,7 +161,7 @@ export function Waveform() {
       ctx.fillStyle = css("--accent", "#4ea1ff");
       ctx.fillRect((vs / current.frames) * w, h - bh, Math.max(2, (span / current.frames) * w), bh);
     }
-  }, [current, region, pos, playing, peaks, view]);
+  }, [current, region, pos, playing, peaks, view, size]);
 
   const frameAt = (e: React.MouseEvent) => {
     if (!current || !ref.current || !view) return 0;
