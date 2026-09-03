@@ -1,0 +1,289 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use serde::Serialize;
+use soundbox::db::Db;
+use soundbox::player::{normalise_gain, Cmd, Player};
+use soundbox::search::{Hit, Index};
+use soundbox::{audio, cache, scan};
+use tauri::{Emitter, Manager, State};
+use tauri_plugin_dialog::DialogExt;
+
+struct App {
+    db: Mutex<Db>,
+    index: Mutex<Index>,
+    player: Option<Player>,
+    current: Mutex<Option<CurrentFile>>,
+    base: PathBuf,
+}
+
+struct CurrentFile {
+    frames: usize,
+}
+
+fn base_dir() -> PathBuf {
+    dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("SoundBox")
+}
+
+#[derive(Serialize, Clone)]
+struct ItemDto {
+    id: i64,
+    filename: String,
+    folder: String,
+    duration_ms: u64,
+    channels: usize,
+    sample_rate: u32,
+    ext: String,
+}
+
+#[derive(Serialize, Clone)]
+struct ScanEvent {
+    done: usize,
+    total: usize,
+}
+
+#[derive(Serialize)]
+struct LoadedDto {
+    id: i64,
+    path: String,
+    frames: usize,
+    duration_ms: u64,
+    sample_rate: u32,
+    channels: usize,
+    peaks: Vec<Vec<(f32, f32)>>,
+    lufs: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct StatusDto {
+    pos: u64,
+    playing: bool,
+    frames: usize,
+}
+
+fn reload_index(app: &App) -> Result<usize, String> {
+    let items = app.db.lock().unwrap().all_items().map_err(|e| e.to_string())?;
+    let n = items.len();
+    *app.index.lock().unwrap() = Index::new(items);
+    Ok(n)
+}
+
+#[tauri::command]
+async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog().file().pick_folder(move |p| {
+        let _ = tx.send(p);
+    });
+    tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .ok()
+        .flatten()
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn add_root(
+    handle: tauri::AppHandle,
+    state: State<'_, App>,
+    path: String,
+) -> Result<usize, String> {
+    let dir = PathBuf::from(&path);
+    if !dir.is_dir() {
+        return Err(format!("{path} is not a directory"));
+    }
+    let label = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let root_id = {
+        let db = state.db.lock().unwrap();
+        db.add_root(&dir, &label).map_err(|e| e.to_string())?
+    };
+
+    let stats = {
+        let db = state.db.lock().unwrap();
+        scan::scan_root(&db, &state.base, root_id, &dir, |p| {
+            // Throttle: one event per 1% is plenty for a progress bar.
+            if p.total < 100 || p.done % (p.total / 100).max(1) == 0 {
+                let _ = handle.emit("scan:progress", ScanEvent { done: p.done, total: p.total });
+            }
+        })
+        .map_err(|e| e.to_string())?
+    };
+    let _ = handle.emit("scan:done", stats.total);
+    reload_index(&state)
+}
+
+#[tauri::command]
+fn roots(state: State<'_, App>) -> Result<Vec<(i64, String, String)>, String> {
+    state.db.lock().unwrap().roots().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn library_size(state: State<'_, App>) -> usize {
+    state.index.lock().unwrap().len()
+}
+
+#[tauri::command]
+fn search(state: State<'_, App>, query: String, limit: usize) -> Vec<(Hit, ItemDto)> {
+    let mut ix = state.index.lock().unwrap();
+    let hits = ix.search(&query, limit);
+    hits.into_iter()
+        .filter_map(|h| {
+            ix.get(h.id).map(|i| {
+                (
+                    h.clone(),
+                    ItemDto {
+                        id: i.id,
+                        filename: i.filename.clone(),
+                        folder: i.folder.clone(),
+                        duration_ms: i.duration_ms,
+                        channels: i.channels,
+                        sample_rate: i.sample_rate,
+                        ext: i.ext.clone(),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn file_path(state: State<'_, App>, id: i64) -> Result<String, String> {
+    state.db.lock().unwrap().path_for(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn load(state: State<'_, App>, id: i64, normalise: bool) -> Result<LoadedDto, String> {
+    let (path, key, lufs, peak_db) = {
+        let db = state.db.lock().unwrap();
+        db.load_info(id).map_err(|e| e.to_string())?
+    };
+
+    let decoded = Arc::new(audio::decode_file(std::path::Path::new(&path)).map_err(|e| e.to_string())?);
+
+    // Prefer the cached peaks; fall back to computing them if the blob is
+    // missing or was written by an older cache version.
+    let peaks = match cache::read(&state.base, &key) {
+        Ok(p) => p.to_f32(),
+        Err(_) => cache::build(&decoded).to_f32(),
+    };
+
+    let gain = if normalise {
+        normalise_gain(lufs, -18.0, peak_db.unwrap_or(-1.0))
+    } else {
+        1.0
+    };
+
+    let dto = LoadedDto {
+        id,
+        path,
+        frames: decoded.frames(),
+        duration_ms: decoded.duration_ms(),
+        sample_rate: decoded.sample_rate,
+        channels: decoded.channels,
+        peaks,
+        lufs,
+    };
+
+    *state.current.lock().unwrap() = Some(CurrentFile { frames: decoded.frames() });
+    if let Some(p) = &state.player {
+        p.send(Cmd::Load { audio: decoded, gain });
+    }
+    Ok(dto)
+}
+
+#[tauri::command]
+fn play(state: State<'_, App>, start: usize, end: usize, looping: bool) {
+    if let Some(p) = &state.player {
+        p.send(Cmd::Play { start, end, looping });
+    }
+}
+
+#[tauri::command]
+fn toggle(state: State<'_, App>) {
+    if let Some(p) = &state.player {
+        p.send(Cmd::Toggle);
+    }
+}
+
+#[tauri::command]
+fn stop(state: State<'_, App>) {
+    if let Some(p) = &state.player {
+        p.send(Cmd::Stop);
+    }
+}
+
+#[tauri::command]
+fn set_looping(state: State<'_, App>, looping: bool) {
+    if let Some(p) = &state.player {
+        p.send(Cmd::SetLooping(looping));
+    }
+}
+
+#[tauri::command]
+fn status(state: State<'_, App>) -> StatusDto {
+    let frames = state.current.lock().unwrap().as_ref().map(|c| c.frames).unwrap_or(0);
+    match &state.player {
+        Some(p) => StatusDto { pos: p.position(), playing: p.is_playing(), frames },
+        None => StatusDto { pos: 0, playing: false, frames },
+    }
+}
+
+#[tauri::command]
+fn device_info(state: State<'_, App>) -> String {
+    match state.player.as_ref().and_then(|p| p.output_info()) {
+        Some((r, c)) => format!("{r} Hz / {c} ch"),
+        None => "no audio device".into(),
+    }
+}
+
+fn main() {
+    // WebKitGTK's DMA-BUF renderer hard-crashes with a Wayland protocol error on
+    // NVIDIA. Must be set before GTK initialises.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_drag::init())
+        .setup(|app| {
+            let base = base_dir();
+            let db = Db::open(&base.join("library.db"))?;
+            let items = db.all_items().unwrap_or_default();
+            let player = match Player::spawn() {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    eprintln!("audio unavailable: {e}");
+                    None
+                }
+            };
+            app.manage(App {
+                db: Mutex::new(db),
+                index: Mutex::new(Index::new(items)),
+                player,
+                current: Mutex::new(None),
+                base,
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            pick_folder,
+            add_root,
+            roots,
+            library_size,
+            search,
+            file_path,
+            load,
+            play,
+            toggle,
+            stop,
+            set_looping,
+            status,
+            device_info
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

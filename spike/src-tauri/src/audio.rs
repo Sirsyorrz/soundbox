@@ -174,8 +174,10 @@ pub struct Engine {
     out_rate: u32,
 }
 
-// cpal::Stream is not Send on some backends; the engine is only ever touched
-// behind a Mutex inside Tauri state on the main thread.
+// cpal::Stream is !Send on some backends. Access is serialised by a Mutex, but
+// that does not make the stream handle itself safe to move across threads, so
+// this is an assertion rather than a proof. Holds on ALSA/WASAPI; the real app
+// should own the stream on a dedicated thread and drive it over a channel.
 unsafe impl Send for Engine {}
 unsafe impl Sync for Engine {}
 

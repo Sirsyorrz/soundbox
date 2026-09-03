@@ -113,7 +113,6 @@ async function select(i) {
   }
 }
 
-// --- drag-out: the thing this spike exists to prove ---
 const DRAG_ICON =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKklEQVR42mNgGAWjYBSMglEwCkbBKBgFo2AUjIJRMApGwSgYBaNgFAxvAAAI8AAB0Y6l0QAAAABJRU5ErkJggg==";
 
@@ -135,7 +134,6 @@ async function startDrag(f) {
   }
 }
 
-// --- waveform ---
 const cv = $("wave"), ctx = cv.getContext("2d");
 
 function draw(playPos = null) {
