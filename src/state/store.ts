@@ -83,6 +83,8 @@ interface State {
   setShowFailed: (v: boolean) => void;
   cancelScan: () => void;
   pruneCache: () => Promise<void>;
+  showSettings: boolean;
+  setShowSettings: (v: boolean) => void;
   showShortcuts: boolean;
   setShowShortcuts: (v: boolean) => void;
   loadProfiles: () => Promise<void>;
@@ -115,6 +117,7 @@ export const useStore = create<State>((set, get) => ({
   keymap: SAVED.keymap,
   failed: [],
   showFailed: false,
+  showSettings: false,
   showShortcuts: false,
   sort: SAVED.sort,
   desc: SAVED.desc,
@@ -270,6 +273,8 @@ export const useStore = create<State>((set, get) => ({
     set({ keymap: {} });
     saveSettings({ keymap: {} });
   },
+
+  setShowSettings: (showSettings) => set({ showSettings }),
 
   setShowShortcuts: (showShortcuts) => set({ showShortcuts }),
 

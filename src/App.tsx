@@ -10,6 +10,7 @@ import { RenameBox, TagEditor, TagRail } from "./panels/Tags";
 import { Splitter, useSplitters } from "./panels/Splitter";
 import { Updater } from "./panels/Updater";
 import { Shortcuts } from "./panels/Shortcuts";
+import { Settings } from "./panels/Settings";
 import { ACTIONS, comboOf, resolveTable } from "./actions";
 import "./app.css";
 
@@ -111,6 +112,7 @@ function Detail() {
           <span className="dim">select a sound</span>
         )}
       </div>
+      <Settings />
       <Shortcuts />
       <RenameBox />
       <TagEditor />
@@ -263,23 +265,8 @@ function Profiles() {
         </button>
       </div>
       <div className="profile-actions">
-        <button
-          title="Delete cached waveforms no profile refers to any more"
-          onClick={() => void useStore.getState().pruneCache()}
-        >
-          Clean cache
-        </button>
-        <button
-          title="Rebindable keyboard shortcuts  ( Ctrl + / )"
-          onClick={() => useStore.getState().setShowShortcuts(true)}
-        >
-          Shortcuts
-        </button>
-        <button
-          title="Check GitHub for a newer version"
-          onClick={() => useStore.setState((v) => ({ updateNonce: v.updateNonce + 1 }))}
-        >
-          Check for updates
+        <button title="Shortcuts, storage and updates" onClick={() => s.setShowSettings(true)}>
+          Settings
         </button>
       </div>
     </>

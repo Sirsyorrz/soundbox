@@ -562,3 +562,18 @@ body.row-resize * {
 .tagrow.warn {
   color: var(--warn, #f59e0b);
 }
+
+.setrow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+}
+.setlabel {
+  flex: 1;
+  min-width: 0;
+}
+.setlabel .dim {
+  font-size: var(--fs-sm);
+  margin-top: 2px;
+}
