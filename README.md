@@ -1,7 +1,7 @@
 # SoundBox
 
 A local sound library browser. Fuzzy search, waveform display, region audition,
-and renaming — built to sit beside a script or an NLE while you edit.
+and renaming
 
 Never modifies audio content. Renaming a file on disk is the only write it performs,
 and only when you ask for it.
