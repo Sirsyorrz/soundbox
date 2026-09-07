@@ -1,3 +1,5 @@
+<img src="assets/logo.png" alt="SoundBox" width="160" align="right" />
+
 # SoundBox
 
 A local sound library browser. Fuzzy search, waveform display, region audition,
