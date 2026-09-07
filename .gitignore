@@ -2,4 +2,4 @@ target/
 node_modules/
 dist/
 spike/src-tauri/gen/
-*.md
+
