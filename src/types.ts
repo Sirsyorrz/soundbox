@@ -11,12 +11,13 @@ export interface Item {
   last_played: number;
   favorite: boolean;
   tags: string[];
-  folder_tags: string[];
 }
 
 export interface Filter {
   favoritesOnly: boolean;
   tag: string | null;
+  root: number | null;
+  folder: string | null;
 }
 
 export interface Hit {
@@ -39,6 +40,13 @@ export interface Root {
   id: number;
   path: string;
   label: string;
+}
+
+/** A folder holding sounds, as reported by the backend. */
+export interface FolderNode {
+  root: number;
+  path: string;
+  count: number;
 }
 
 export interface Loaded {

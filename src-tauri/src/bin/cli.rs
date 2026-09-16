@@ -161,7 +161,7 @@ fn cmd_play(args: &[String]) -> Result<()> {
 
     let (s, e) = (frames / 4, frames / 2);
     println!("play region {s}..{e}");
-    p.send(Cmd::Play { start: s, end: e, looping: false });
+    p.send(Cmd::Play { start: s, end: e });
     for _ in 0..10 {
         std::thread::sleep(std::time::Duration::from_millis(60));
         println!("  pos={} playing={}", p.position(), p.is_playing());
@@ -171,7 +171,7 @@ fn cmd_play(args: &[String]) -> Result<()> {
     }
 
     println!("toggle pause/resume");
-    p.send(Cmd::Play { start: 0, end: frames, looping: true });
+    p.send(Cmd::Play { start: 0, end: frames });
     std::thread::sleep(std::time::Duration::from_millis(120));
     let before = p.position();
     p.send(Cmd::Toggle);

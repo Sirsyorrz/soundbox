@@ -205,11 +205,8 @@ mod tests {
         db.all_items().unwrap().into_iter().find(|i| i.filename == name).unwrap().id
     }
 
-    /// Tags the user actually chose, without the folder-derived ones.
     fn user_tags(db: &Db) -> Vec<String> {
-        let item = db.all_items().unwrap().remove(0);
-        let mut t: Vec<String> =
-            item.tags.into_iter().filter(|x| !item.folder_tags.contains(x)).collect();
+        let mut t = db.all_items().unwrap().remove(0).tags;
         t.sort();
         t
     }
@@ -224,17 +221,6 @@ mod tests {
         let keys: Vec<&str> = pack.entries.iter().map(|e| e.content_key.as_str()).collect();
         assert_eq!(keys.len(), 2, "the untagged sound should not be exported");
         assert!(keys.contains(&"k1") && keys.contains(&"k2"));
-    }
-
-    #[test]
-    fn folder_tags_do_not_travel_in_a_pack() {
-        // They belong to whatever machine holds the files, not to the sound.
-        let db = db_with(&[("k1", "a.wav", 10)]);
-        db.toggle_favorite(id_of(&db, "a.wav")).unwrap();
-        assert!(db.all_items().unwrap()[0].tags.contains(&"sub".to_string()));
-
-        let pack = export(&db, "Test").unwrap();
-        assert!(pack.entries[0].tags.is_empty(), "only user-authored tags are exported");
     }
 
     #[test]

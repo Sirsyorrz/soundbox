@@ -244,9 +244,41 @@
   align-items: center;
   gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-3);
+  cursor: pointer;
 }
 .root:hover {
   background: var(--row-hover);
+}
+.root.on,
+.subfolder.on {
+  background: var(--row-sel);
+  color: var(--accent);
+}
+.subfolder {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-3);
+  cursor: pointer;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+}
+.subfolder:hover {
+  background: var(--row-hover);
+}
+.twisty {
+  width: 14px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--fg-faint);
+  transition: transform 0.1s;
+}
+.twisty.open {
+  transform: rotate(90deg);
+}
+.twisty:disabled {
+  opacity: 0;
 }
 .root-label {
   flex: 1;
@@ -499,11 +531,6 @@ body.row-resize * {
   font-size: var(--fs-sm);
 }
 
-.chip.derived {
-  border-style: dashed;
-  color: var(--fg-dim);
-}
-
 .modal-back {
   position: fixed;
   inset: 0;
@@ -584,9 +611,4 @@ button.danger {
 }
 button.danger:hover:not(:disabled) {
   border-color: #f87171;
-}
-
-.tagrow.derived .tagname {
-  color: var(--fg-dim);
-  font-style: italic;
 }

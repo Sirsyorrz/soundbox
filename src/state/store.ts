@@ -1,6 +1,16 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import type { Filter, Hit, Item, Loaded, PackPreview, Registry, Root, Sort } from "../types";
+import type {
+  Filter,
+  FolderNode,
+  Hit,
+  Item,
+  Loaded,
+  PackPreview,
+  Registry,
+  Root,
+  Sort,
+} from "../types";
 import { clearSparks } from "../panels/Sparkline";
 import { loadSettings, saveSettings } from "../settings";
 import type { Keymap } from "../actions";
@@ -13,12 +23,10 @@ interface State {
   hits: [Hit, Item][];
   selected: number;
   current: Loaded | null;
-  region: [number, number] | null;
   /** Visible frame range of the detail waveform. */
   view: [number, number] | null;
   playing: boolean;
   pos: number;
-  looping: boolean;
   normalise: boolean;
   volume: number;
   sort: Sort;
@@ -26,7 +34,8 @@ interface State {
   rowH: number;
   similarGate: boolean;
   roots: Root[];
-  tags: [string, number, boolean][];
+  folders: FolderNode[];
+  tags: [string, number][];
   filter: Filter;
   librarySize: number;
   scanning: { done: number; total: number } | null;
@@ -51,22 +60,18 @@ interface State {
   loadTags: () => Promise<void>;
   setFilter: (f: Filter) => Promise<void>;
   move: (delta: number) => Promise<void>;
-  setRegion: (r: [number, number] | null) => void;
   setView: (v: [number, number]) => void;
   zoom: (factor: number) => void;
   zoomToFit: () => void;
-  zoomToRegion: () => void;
-  markIn: () => void;
-  markOut: () => void;
-  playRegion: (r?: [number, number]) => void;
+  playFrom: (frame: number) => void;
   toggle: () => void;
   stop: () => void;
-  setLooping: (v: boolean) => void;
   setNormalise: (v: boolean) => Promise<void>;
   setVolume: (v: number) => void;
   setSort: (s: Sort) => Promise<void>;
   sortBy: (s: Sort) => Promise<void>;
   loadRoots: () => Promise<void>;
+  loadFolders: () => Promise<void>;
   removeRoot: (id: number) => Promise<void>;
   rescanRoot: (id: number) => Promise<void>;
   setLayout: (l: LayoutName) => void;
@@ -106,11 +111,9 @@ export const useStore = create<State>((set, get) => ({
   hits: [],
   selected: -1,
   current: null,
-  region: null,
   view: null,
   playing: false,
   pos: 0,
-  looping: SAVED.looping,
   normalise: SAVED.normalise,
   volume: SAVED.volume,
   registry: null,
@@ -125,8 +128,9 @@ export const useStore = create<State>((set, get) => ({
   rowH: 26,
   similarGate: true,
   roots: [],
+  folders: [],
   tags: [],
-  filter: { favoritesOnly: false, tag: null },
+  filter: { favoritesOnly: false, tag: null, root: null, folder: null },
   renaming: false,
   librarySize: 0,
   scanning: null,
@@ -162,8 +166,8 @@ export const useStore = create<State>((set, get) => ({
         id: entry[1].id,
         normalise: get().normalise,
       });
-      set({ current: loaded, region: [0, loaded.frames], view: [0, loaded.frames] });
-      get().playRegion([0, loaded.frames]);
+      set({ current: loaded, view: [0, loaded.frames] });
+      get().playFrom(0);
     } catch (e) {
       set({ message: `decode failed: ${e}` });
     }
@@ -180,8 +184,8 @@ export const useStore = create<State>((set, get) => ({
     }
     try {
       const loaded = await invoke<Loaded>("load", { id, normalise: get().normalise });
-      set({ current: loaded, region: [0, loaded.frames], view: [0, loaded.frames], selected: -1 });
-      get().playRegion([0, loaded.frames]);
+      set({ current: loaded, view: [0, loaded.frames], selected: -1 });
+      get().playFrom(0);
     } catch (e) {
       set({ message: `decode failed: ${e}` });
     }
@@ -291,8 +295,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   clearTags: async () => {
-    const userTags = get().tags.filter(([, , isUser]) => isUser);
-    if (userTags.length === 0) {
+    if (get().tags.length === 0) {
       set({ message: "no tags to clear" });
       return;
     }
@@ -319,7 +322,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   loadTags: async () => {
-    const tags = await invoke<[string, number, boolean][]>("tags");
+    const tags = await invoke<[string, number][]>("tags");
     // Filtering by a tag that no longer exists would show an empty list with
     // no obvious way back.
     const { filter } = get();
@@ -337,8 +340,6 @@ export const useStore = create<State>((set, get) => ({
     const next = Math.max(0, Math.min(hits.length - 1, selected + delta));
     if (next !== selected) await get().select(next);
   },
-
-  setRegion: (region) => set({ region }),
 
   setView: (view) => set({ view }),
 
@@ -359,41 +360,15 @@ export const useStore = create<State>((set, get) => ({
     if (current) set({ view: [0, current.frames] });
   },
 
-  zoomToRegion: () => {
-    const { region, current } = get();
-    if (!region || !current || region[1] - region[0] < 256) return;
-    set({ view: [region[0], region[1]] });
-  },
-
-  markIn: () => {
-    const { region, pos, current } = get();
-    if (!current || !region) return;
-    const start = Math.min(pos, region[1] - 1);
-    set({ region: [Math.max(0, start), region[1]] });
-  },
-
-  markOut: () => {
-    const { region, pos, current } = get();
-    if (!current || !region) return;
-    const end = Math.max(pos, region[0] + 1);
-    set({ region: [region[0], Math.min(current.frames, end)] });
-  },
-
-  playRegion: (r) => {
-    const region = r ?? get().region;
-    if (!region) return;
-    set({ region });
-    void invoke("play", { start: region[0], end: region[1], looping: get().looping });
+  playFrom: (frame) => {
+    const { current } = get();
+    if (!current) return;
+    const start = Math.max(0, Math.min(current.frames, Math.round(frame)));
+    void invoke("play", { start, end: current.frames });
   },
 
   toggle: () => void invoke("toggle"),
   stop: () => void invoke("stop"),
-
-  setLooping: (looping) => {
-    set({ looping });
-    saveSettings({ looping });
-    void invoke("set_looping", { looping });
-  },
 
   setNormalise: async (normalise) => {
     set({ normalise });
@@ -427,12 +402,28 @@ export const useStore = create<State>((set, get) => ({
 
   loadRoots: async () => {
     const rows = await invoke<[number, string, string][]>("roots");
-    set({ roots: rows.map(([id, path, label]) => ({ id, path, label })) });
+    const roots = rows.map(([id, path, label]) => ({ id, path, label }));
+    // Filtering by a folder that is gone would show an empty list with no
+    // obvious way back.
+    const { filter } = get();
+    const stale = filter.root != null && !roots.some((r) => r.id === filter.root);
+    set(stale ? { roots, filter: { ...filter, root: null, folder: null } } : { roots });
+    await get().loadFolders();
+  },
+
+  loadFolders: async () => {
+    const rows = await invoke<[number, string, number][]>("folders");
+    const folders = rows.map(([root, path, count]) => ({ root, path, count }));
+    const { filter } = get();
+    const stale =
+      filter.folder != null &&
+      !folders.some((f) => f.root === filter.root && f.path === filter.folder);
+    set(stale ? { folders, filter: { ...filter, folder: null } } : { folders });
   },
 
   removeRoot: async (id) => {
     await invoke("remove_root", { id });
-    set({ selected: -1, current: null, region: null });
+    set({ selected: -1, current: null });
     await get().loadRoots();
     await get().refresh();
   },
@@ -443,6 +434,7 @@ export const useStore = create<State>((set, get) => ({
       const n = await invoke<number>("rescan_root", { id });
       clearSparks();
       set({ message: `${n} sounds indexed` });
+      await get().loadFolders();
       await get().loadFailed();
       await get().refresh();
     } catch (e) {
@@ -487,7 +479,13 @@ export const useStore = create<State>((set, get) => ({
     await get().loadRoots();
     await get().loadTags();
     clearSparks();
-    set({ query: "", selected: -1, current: null, message: `${n} sounds` });
+    set({
+      query: "",
+      selected: -1,
+      current: null,
+      filter: { ...get().filter, root: null, folder: null },
+      message: `${n} sounds`,
+    });
     await get().refresh();
   },
 

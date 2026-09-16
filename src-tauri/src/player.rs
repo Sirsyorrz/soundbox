@@ -12,10 +12,9 @@ const FADE_FRAMES: f64 = 240.0;
 
 pub enum Cmd {
     Load { audio: Arc<Decoded>, gain: f32 },
-    Play { start: usize, end: usize, looping: bool },
+    Play { start: usize, end: usize },
     Toggle,
     Stop,
-    SetLooping(bool),
     SetGain(f32),
     SetVolume(f32),
     Quit,
@@ -26,7 +25,6 @@ struct Shared {
     step: f64,
     pos: f64,
     region: (usize, usize),
-    looping: bool,
     /// Per-file normalisation.
     gain: f32,
     /// Master volume, set by the user.
@@ -117,7 +115,6 @@ fn build_stream(pos: Arc<AtomicU64>, playing: Arc<AtomicBool>) -> Result<Built> 
         step: 1.0,
         pos: 0.0,
         region: (0, 0),
-        looping: false,
         gain: 1.0,
         volume: 1.0,
     }));
@@ -149,15 +146,11 @@ fn build_stream(pos: Arc<AtomicU64>, playing: Arc<AtomicBool>) -> Result<Built> 
             let src_ch = audio.channels;
             for f in 0..out.len() / channels {
                 if s.pos >= re as f64 {
-                    if s.looping {
-                        s.pos = rs as f64;
-                    } else {
-                        for c in 0..channels {
-                            out[f * channels + c] = 0.0;
-                        }
-                        playing.store(false, Ordering::Relaxed);
-                        continue;
+                    for c in 0..channels {
+                        out[f * channels + c] = 0.0;
                     }
+                    playing.store(false, Ordering::Relaxed);
+                    continue;
                 }
                 let i = s.pos as usize;
                 let fade = ((s.pos - rs as f64) / FADE_FRAMES)
@@ -197,12 +190,11 @@ fn run(
                 s.gain = gain;
                 s.audio = Some(audio);
             }
-            Cmd::Play { start, end, looping } => {
+            Cmd::Play { start, end } => {
                 let total = s.audio.as_ref().map(|a| a.frames()).unwrap_or(0);
                 let start = start.min(total);
                 s.region = (start, end.min(total).max(start));
                 s.pos = start as f64;
-                s.looping = looping;
                 playing.store(total > 0, Ordering::Relaxed);
             }
             Cmd::Toggle => {
@@ -222,7 +214,6 @@ fn run(
                 playing.store(false, Ordering::Relaxed);
                 s.pos = s.region.0 as f64;
             }
-            Cmd::SetLooping(l) => s.looping = l,
             Cmd::SetGain(g) => s.gain = g,
             Cmd::SetVolume(v) => s.volume = v.clamp(0.0, 2.0),
             Cmd::Quit => return,

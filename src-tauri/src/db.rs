@@ -213,6 +213,7 @@ impl Db {
     pub fn all_items(&self) -> Result<Vec<crate::search::Item>> {
         let mut st = self.conn.prepare(
             "SELECT f.id, f.filename, f.rel_path, f.duration_ms, f.channels,
+                    f.root_id,
                     f.sample_rate, f.ext, f.content_key, f.scanned_at, f.mtime,
                     COALESCE((SELECT MAX(played_at) FROM plays p
                               WHERE p.content_key = f.content_key), 0),
@@ -227,40 +228,25 @@ impl Db {
                 let rel: String = r.get(2)?;
                 let folder =
                     rel.rsplit_once(['/', '\\']).map(|(d, _)| d.to_string()).unwrap_or_default();
-                let folder_tags: Vec<String> = folder
-                    .split(['/', '\\'])
-                    .filter(|s| !s.is_empty() && *s != ".")
-                    .map(str::to_string)
-                    .collect();
                 Ok(crate::search::Item {
                     id: r.get(0)?,
+                    root_id: r.get(5)?,
                     filename: r.get(1)?,
                     folder,
                     duration_ms: r.get::<_, i64>(3)? as u64,
                     channels: r.get::<_, i64>(4)? as usize,
-                    sample_rate: r.get(5)?,
-                    ext: r.get(6)?,
-                    content_key: r.get(7)?,
-                    added_at: r.get(8)?,
-                    mtime: r.get(9)?,
-                    last_played: r.get(10)?,
-                    favorite: r.get(11)?,
-                    tags: {
-                        // Folder names are tags as far as the UI is concerned; the
-                        // derived list stays separate so they cannot be un-tagged.
-                        let mut t: Vec<String> = r
-                            .get::<_, String>(12)?
-                            .split_whitespace()
-                            .map(str::to_string)
-                            .collect();
-                        for f in &folder_tags {
-                            if !t.contains(f) {
-                                t.push(f.clone());
-                            }
-                        }
-                        t
-                    },
-                    folder_tags,
+                    sample_rate: r.get(6)?,
+                    ext: r.get(7)?,
+                    content_key: r.get(8)?,
+                    added_at: r.get(9)?,
+                    mtime: r.get(10)?,
+                    last_played: r.get(11)?,
+                    favorite: r.get(12)?,
+                    tags: r
+                        .get::<_, String>(13)?
+                        .split_whitespace()
+                        .map(str::to_string)
+                        .collect(),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -665,7 +651,7 @@ mod tests {
     }
 
     #[test]
-    fn clearing_tags_leaves_favourites_and_folder_tags_alone() {
+    fn clearing_tags_leaves_favourites_alone() {
         let db = db_with(&["a.wav", "b.wav"]);
         db.tag_file(id_of(&db, "a.wav"), "whoosh").unwrap();
         db.tag_file(id_of(&db, "b.wav"), "metal").unwrap();
@@ -677,7 +663,7 @@ mod tests {
 
         let item = db.all_items().unwrap().into_iter().find(|i| i.filename == "a.wav").unwrap();
         assert!(item.favorite, "favourites are not tags");
-        assert_eq!(item.tags, vec!["sub"], "folder tags come from the path, not the table");
+        assert!(item.tags.is_empty());
     }
 
     #[test]

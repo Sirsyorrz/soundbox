@@ -2,7 +2,7 @@
 
 # SoundBox
 
-A local sound library browser. Fuzzy search, waveform display, region audition,
+A local sound library browser. Fuzzy search, waveform display, click-to-audition,
 and renaming
 
 Never modifies audio content. Renaming a file on disk is the only write it performs,
@@ -11,7 +11,8 @@ and only when you ask for it.
 ## Features
 
 - Fuzzy search across your whole library, per keystroke
-- Waveform view with click-and-drag region audition
+- Waveform view; click anywhere to play from there
+- Folder tree per library root, click to filter
 - Loudness (EBU R128) and peak dB per file
 - "Find similar" based on audio features
 - Safe rename with an undo log

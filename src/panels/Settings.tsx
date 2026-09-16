@@ -8,10 +8,7 @@ export function Settings() {
   const setShowShortcuts = useStore((s) => s.setShowShortcuts);
   const clearTags = useStore((s) => s.clearTags);
   const exportPack = useStore((s) => s.exportPack);
-  // Filtered in the render body, not the selector: a selector returning a new
-  // array every call makes useSyncExternalStore throw and blanks the app.
   const tags = useStore((s) => s.tags);
-  const userTags = tags.filter(([, , isUser]) => isUser);
 
   if (!open) return null;
 
@@ -64,9 +61,9 @@ export function Settings() {
             </div>
             <button
               className="danger"
-              disabled={userTags.length === 0}
+              disabled={tags.length === 0}
               onClick={async () => {
-                const names = userTags.map(([n]) => n);
+                const names = tags.map(([n]) => n);
                 const preview = names.slice(0, 8).join(", ");
                 const more = names.length > 8 ? `, and ${names.length - 8} more` : "";
                 if (

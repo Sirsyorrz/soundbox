@@ -19,20 +19,14 @@ export function TagEditor() {
       >
         {item.favorite ? "★" : "☆"}
       </button>
-      {item.tags.map((t) => {
-        // Folder tags come from the path, so there is nothing to remove.
-        const derived = item.folder_tags.includes(t);
-        return (
-          <span className={"chip" + (derived ? " derived" : "")} key={t}>
-            {t}
-            {!derived && (
-              <button title={`Remove tag "${t}"`} onClick={() => void removeTag(item.id, t)}>
-                ×
-              </button>
-            )}
-          </span>
-        );
-      })}
+      {item.tags.map((t) => (
+        <span className="chip" key={t}>
+          {t}
+          <button title={`Remove tag "${t}"`} onClick={() => void removeTag(item.id, t)}>
+            ×
+          </button>
+        </span>
+      ))}
       <input
         id="tag-input"
         className="taginput"
@@ -109,11 +103,10 @@ export function TagRail() {
         <span>★ Favourites</span>
       </div>
       {tags.length === 0 && <div className="dim pad">no tags yet</div>}
-      {tags.map(([name, count, isUser]) => (
+      {tags.map(([name, count]) => (
         <div
           key={name}
-          className={"tagrow" + (filter.tag === name ? " on" : "") + (isUser ? "" : " derived")}
-          title={isUser ? undefined : `Folder name: every sound under ${name}`}
+          className={"tagrow" + (filter.tag === name ? " on" : "")}
           onClick={() => void setFilter({ ...filter, tag: filter.tag === name ? null : name })}
         >
           <span className="tagname">{name}</span>

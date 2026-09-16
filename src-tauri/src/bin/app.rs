@@ -52,9 +52,6 @@ struct ItemDto {
     last_played: i64,
     favorite: bool,
     tags: Vec<String>,
-    /// Which of `tags` came from the folder path, so the UI can show them as
-    /// fixed rather than removable.
-    folder_tags: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -258,7 +255,6 @@ fn search(
                         last_played: i.last_played,
                         favorite: i.favorite,
                         tags: i.tags.clone(),
-                        folder_tags: i.folder_tags.clone(),
                     },
                 )
             })
@@ -305,7 +301,6 @@ fn similar(
                     last_played: i.last_played,
                     favorite: i.favorite,
                     tags: i.tags.clone(),
-                    folder_tags: i.folder_tags.clone(),
                 },
                 score: n.score,
             })
@@ -359,30 +354,39 @@ async fn untag_file(state: State<'_, App>, id: i64, tag: String) -> Result<(), S
     reload_index(&state).map(|_| ())
 }
 
-/// (name, count, user-authored). Counts come from the index so folder-derived
-/// tags are included, but they are flagged: only the user's own can be edited
-/// or cleared.
+/// (name, count).
 #[tauri::command]
-fn tags(state: State<'_, App>) -> Vec<(String, i64, bool)> {
+fn tags(state: State<'_, App>) -> Vec<(String, i64)> {
     let ix = state.index.lock().unwrap();
     let mut counts: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
-    let mut derived: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for item in ix.items() {
         for t in &item.tags {
             *counts.entry(t.as_str()).or_default() += 1;
         }
-        for t in &item.folder_tags {
-            derived.insert(t.as_str());
+    }
+    let mut out: Vec<(String, i64)> =
+        counts.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    out
+}
+
+/// Every folder holding sounds, as (root id, path relative to the root, count).
+/// A folder's count includes everything in its subfolders.
+#[tauri::command]
+fn folders(state: State<'_, App>) -> Vec<(i64, String, i64)> {
+    let ix = state.index.lock().unwrap();
+    let mut counts: std::collections::HashMap<(i64, String), i64> =
+        std::collections::HashMap::new();
+    for item in ix.items() {
+        let parts: Vec<&str> =
+            item.folder.split(['/', '\\']).filter(|s| !s.is_empty() && *s != ".").collect();
+        for n in 1..=parts.len() {
+            *counts.entry((item.root_id, parts[..n].join("/"))).or_default() += 1;
         }
     }
-    let mut out: Vec<(String, i64, bool)> = counts
-        .into_iter()
-        .map(|(k, v)| {
-            let is_user = !derived.contains(k);
-            (k.to_string(), v, is_user)
-        })
-        .collect();
-    out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let mut out: Vec<(i64, String, i64)> =
+        counts.into_iter().map(|((r, p), c)| (r, p, c)).collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     out
 }
 
@@ -632,9 +636,9 @@ fn peaks_range(
 }
 
 #[tauri::command]
-fn play(state: State<'_, App>, start: usize, end: usize, looping: bool) {
+fn play(state: State<'_, App>, start: usize, end: usize) {
     if let Some(p) = &state.player {
-        p.send(Cmd::Play { start, end, looping });
+        p.send(Cmd::Play { start, end });
     }
 }
 
@@ -649,13 +653,6 @@ fn toggle(state: State<'_, App>) {
 fn stop(state: State<'_, App>) {
     if let Some(p) = &state.player {
         p.send(Cmd::Stop);
-    }
-}
-
-#[tauri::command]
-fn set_looping(state: State<'_, App>, looping: bool) {
-    if let Some(p) = &state.player {
-        p.send(Cmd::SetLooping(looping));
     }
 }
 
@@ -754,6 +751,7 @@ fn main() {
             tag_file,
             untag_file,
             tags,
+            folders,
             prune_cache,
             cancel_scan,
             clear_tags,
@@ -765,7 +763,6 @@ fn main() {
             peaks_range,
             toggle,
             stop,
-            set_looping,
             set_volume,
             remove_root,
             rescan_root,

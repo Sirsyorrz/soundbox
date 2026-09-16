@@ -10,16 +10,13 @@ function css(name: string, fallback: string) {
 
 export function Waveform() {
   const current = useStore((s) => s.current);
-  const region = useStore((s) => s.region);
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
   const pos = useStore((s) => s.pos);
   const playing = useStore((s) => s.playing);
-  const setRegion = useStore((s) => s.setRegion);
-  const playRegion = useStore((s) => s.playRegion);
+  const playFrom = useStore((s) => s.playFrom);
 
   const ref = useRef<HTMLCanvasElement>(null);
-  const drag = useRef<number | null>(null);
   const [peaks, setPeaks] = useState<[number, number][][]>([]);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
@@ -79,13 +76,6 @@ export function Waveform() {
     const span = Math.max(1, ve - vs);
     const toX = (f: number) => ((f - vs) / span) * w;
 
-    if (region) {
-      ctx.fillStyle = css("--region", "rgba(255,204,78,0.12)");
-      const x0 = toX(region[0]);
-      const x1 = toX(region[1]);
-      ctx.fillRect(x0, 0, Math.max(1, x1 - x0), h);
-    }
-
     const lanes = peaks.length;
     const laneH = h / lanes;
     const axis = css("--wave-axis", "#2a3441");
@@ -127,19 +117,6 @@ export function Waveform() {
       }
     });
 
-    if (region) {
-      ctx.strokeStyle = css("--sel", "#ffcc4e");
-      ctx.globalAlpha = 0.55;
-      for (const f of region) {
-        const x = toX(f);
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-    }
-
     if (playing) {
       const x = toX(pos);
       if (x >= 0 && x <= w) {
@@ -161,7 +138,7 @@ export function Waveform() {
       ctx.fillStyle = css("--accent", "#4ea1ff");
       ctx.fillRect((vs / current.frames) * w, h - bh, Math.max(2, (span / current.frames) * w), bh);
     }
-  }, [current, region, pos, playing, peaks, view, size]);
+  }, [current, pos, playing, peaks, view, size]);
 
   const frameAt = (e: React.MouseEvent) => {
     if (!current || !ref.current || !view) return 0;
@@ -190,26 +167,7 @@ export function Waveform() {
         setView([start, start + span]);
       }}
       onMouseDown={(e) => {
-        if (current) drag.current = frameAt(e);
-      }}
-      onMouseMove={(e) => {
-        if (drag.current == null || !current) return;
-        const f = frameAt(e);
-        setRegion([Math.min(drag.current, f), Math.max(drag.current, f)]);
-      }}
-      onMouseUp={(e) => {
-        if (drag.current == null || !current) return;
-        const f = frameAt(e);
-        // A click seeks and plays to the end of the view; a drag defines a region.
-        const r: [number, number] =
-          Math.abs(f - drag.current) < 3
-            ? [f, view ? view[1] : current.frames]
-            : [Math.min(drag.current, f), Math.max(drag.current, f)];
-        drag.current = null;
-        playRegion(r);
-      }}
-      onMouseLeave={() => {
-        drag.current = null;
+        if (current) playFrom(frameAt(e));
       }}
     />
   );

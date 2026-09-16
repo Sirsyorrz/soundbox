@@ -5,7 +5,6 @@ export interface Settings {
   volume: number;
   normalise: boolean;
   similarGate: boolean;
-  looping: boolean;
   sort: Sort;
   desc: boolean;
   keymap: Keymap;
@@ -15,7 +14,6 @@ export const DEFAULTS: Settings = {
   volume: 1,
   normalise: true,
   similarGate: true,
-  looping: false,
   sort: "relevance",
   desc: false,
   keymap: {},

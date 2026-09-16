@@ -12,6 +12,7 @@ const FOLDER_EXPAND_MIN: u32 = 40;
 #[derive(Clone)]
 pub struct Item {
     pub id: i64,
+    pub root_id: i64,
     pub filename: String,
     pub folder: String,
     pub duration_ms: u64,
@@ -24,9 +25,6 @@ pub struct Item {
     pub last_played: i64,
     pub favorite: bool,
     pub tags: Vec<String>,
-    /// The subset of `tags` that came from the path rather than the user. They
-    /// are not stored, so they cannot be removed and never travel in a pack.
-    pub folder_tags: Vec<String>,
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -36,16 +34,35 @@ pub struct Filter {
     pub favorites_only: bool,
     #[serde(default)]
     pub tag: Option<String>,
+    #[serde(default)]
+    pub root: Option<i64>,
+    /// Folder path relative to `root`; matches that folder and everything below.
+    #[serde(default)]
+    pub folder: Option<String>,
 }
 
 impl Filter {
     pub fn is_active(&self) -> bool {
-        self.favorites_only || self.tag.is_some()
+        self.favorites_only || self.tag.is_some() || self.root.is_some() || self.folder.is_some()
     }
 
     pub fn keeps(&self, i: &Item) -> bool {
         if self.favorites_only && !i.favorite {
             return false;
+        }
+        if let Some(r) = self.root {
+            if i.root_id != r {
+                return false;
+            }
+        }
+        if let Some(f) = self.folder.as_deref().filter(|f| !f.is_empty()) {
+            let under = i.folder == f
+                || (i.folder.len() > f.len()
+                    && i.folder.starts_with(f)
+                    && matches!(i.folder.as_bytes()[f.len()], b'/' | b'\\'));
+            if !under {
+                return false;
+            }
         }
         match &self.tag {
             Some(t) => i.tags.iter().any(|x| x == t),
@@ -151,13 +168,9 @@ impl Index {
             let name_score =
                 pat.indices(Utf32Str::new(&item.filename, &mut buf), matcher, &mut idx_buf);
             let folder_score = folder_scores.get(item.folder.as_str()).copied();
-            // Folder-derived tags are excluded here: the folder path is already
-            // its own haystack, and counting them twice would both inflate the
-            // score and bypass folder expansion.
             let tag_score = item
                 .tags
                 .iter()
-                .filter(|t| !item.folder_tags.contains(t))
                 .filter_map(|t| {
                     buf.clear();
                     pat.score(Utf32Str::new(t, &mut buf), matcher)
@@ -231,6 +244,7 @@ mod tests {
     fn item(id: i64, folder: &str, filename: &str) -> Item {
         Item {
             id,
+            root_id: 1,
             filename: filename.into(),
             folder: folder.into(),
             duration_ms: 1000,
@@ -242,22 +256,20 @@ mod tests {
             mtime: id,
             last_played: 0,
             favorite: false,
-            // Mirrors the database, which merges folder names into the tag list.
-            tags: folder.split('/').filter(|s| !s.is_empty()).map(str::to_string).collect(),
-            folder_tags: folder.split('/').filter(|s| !s.is_empty()).map(str::to_string).collect(),
+            tags: Vec::new(),
         }
     }
 
     #[test]
-    fn a_folder_name_filters_like_a_tag() {
+    fn folder_filter_covers_subfolders() {
         let mut ix = index();
-        let mut f = |name: &str| {
-            let filter = Filter { favorites_only: false, tag: Some(name.to_string()) };
+        let mut f = |path: &str| {
+            let filter = Filter { folder: Some(path.to_string()), ..Filter::default() };
             ix.search("", 999, Sort::Relevance, false, &filter).len()
         };
-        // Nested folders each filter independently.
-        assert_eq!(f("Farts"), 2);
+        assert_eq!(f("SFX/Farts"), 2);
         assert_eq!(f("SFX"), 3, "the parent covers everything beneath it");
+        assert_eq!(f("SF"), 0, "a partial path component is not a folder");
         assert_eq!(f("nope"), 0);
     }
 
@@ -290,7 +302,7 @@ mod tests {
             tagged(1, "a", "one.wav", &[], true),
             tagged(2, "a", "two.wav", &[], false),
         ]);
-        let f = Filter { favorites_only: true, tag: None };
+        let f = Filter { favorites_only: true, ..Filter::default() };
         let hits = ix.search("", 10, Sort::Relevance, false, &f);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, 1);
@@ -302,8 +314,21 @@ mod tests {
             tagged(1, "a", "hit.wav", &["metal"], false),
             tagged(2, "a", "hit_two.wav", &["wood"], false),
         ]);
-        let f = Filter { favorites_only: false, tag: Some("metal".into()) };
+        let f = Filter { tag: Some("metal".into()), ..Filter::default() };
         let hits = ix.search("hit", 10, Sort::Relevance, false, &f);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, 1);
+    }
+
+    #[test]
+    fn root_filter_keeps_only_that_folder() {
+        let mut a = item(1, "a", "one.wav");
+        let mut b = item(2, "b", "two.wav");
+        a.root_id = 7;
+        b.root_id = 9;
+        let mut ix = Index::new(vec![a, b]);
+        let f = Filter { root: Some(7), ..Filter::default() };
+        let hits = ix.search("", 10, Sort::Relevance, false, &f);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, 1);
     }

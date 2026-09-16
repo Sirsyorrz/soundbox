@@ -18,8 +18,6 @@ function Search() {
   const query = useStore((s) => s.query);
   const setQuery = useStore((s) => s.setQuery);
   const addFolder = useStore((s) => s.addFolder);
-  const looping = useStore((s) => s.looping);
-  const setLooping = useStore((s) => s.setLooping);
   const normalise = useStore((s) => s.normalise);
   const setNormalise = useStore((s) => s.setNormalise);
   const volume = useStore((s) => s.volume);
@@ -39,10 +37,6 @@ function Search() {
           if (e.key === "Escape") setQuery("");
         }}
       />
-      <label>
-        <input type="checkbox" checked={looping} onChange={(e) => setLooping(e.target.checked)} />
-        loop
-      </label>
       <label title="Match preview level to -18 LUFS">
         <input
           type="checkbox"
@@ -122,42 +116,134 @@ function Detail() {
 }
 
 function Sidebar() {
-  const roots = useStore((s) => s.roots);
-  const removeRoot = useStore((s) => s.removeRoot);
-  const rescanRoot = useStore((s) => s.rescanRoot);
-
   return (
     <div className="sidebar">
       <Profiles />
 
       <Failed />
       <TagRail />
+      <FolderTree />
+    </div>
+  );
+}
 
+function FolderTree() {
+  const roots = useStore((s) => s.roots);
+  const folders = useStore((s) => s.folders);
+  const removeRoot = useStore((s) => s.removeRoot);
+  const rescanRoot = useStore((s) => s.rescanRoot);
+  const filter = useStore((s) => s.filter);
+  const setFilter = useStore((s) => s.setFilter);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const toggle = (key: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+
+  const pick = (root: number, folder: string | null) =>
+    void setFilter({
+      ...filter,
+      root: filter.root === root && filter.folder === folder ? null : root,
+      folder: filter.root === root && filter.folder === folder ? null : folder,
+    });
+
+  return (
+    <>
       <div className="sidebar-h">Folders</div>
       {roots.length === 0 && <div className="dim pad">none yet</div>}
-      {roots.map((r) => (
-        <div className="root" key={r.id} title={r.path}>
-          <span className="root-label">{r.label}</span>
-          <button
-            className="x"
-            title="Rescan this folder for new or changed sounds"
-            onClick={() => void rescanRoot(r.id)}
-          >
-            ⟳
-          </button>
-          <button
-            className="x"
-            title={`Remove ${r.path} from the library.\nFiles on disk are not touched.`}
-            onClick={() => {
-              if (confirm(`Remove "${r.label}" from the library?\n\nNo files on disk are deleted.`))
-                void removeRoot(r.id);
-            }}
-          >
-            ×
-          </button>
-        </div>
-      ))}
-    </div>
+      {roots.map((r) => {
+        const mine = folders.filter((f) => f.root === r.id);
+        const hasKids = (path: string) => mine.some((f) => f.path.startsWith(path + "/"));
+        const rootOpen = !collapsed.has(`${r.id}:`);
+        const visible = rootOpen
+          ? mine.filter((f) => {
+              const parts = f.path.split("/");
+              return !parts
+                .slice(0, -1)
+                .some((_, i) => collapsed.has(`${r.id}:${parts.slice(0, i + 1).join("/")}`));
+            })
+          : [];
+
+        return (
+          <div key={r.id}>
+            <div
+              className={"root" + (filter.root === r.id && !filter.folder ? " on" : "")}
+              title={`${r.path}\n\nClick to show only sounds in this folder`}
+              onClick={() => pick(r.id, null)}
+            >
+              <button
+                className={"twisty" + (rootOpen ? " open" : "")}
+                title={rootOpen ? "Collapse" : "Expand"}
+                disabled={mine.length === 0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggle(`${r.id}:`);
+                }}
+              >
+                {mine.length === 0 ? "" : "\u25b8"}
+              </button>
+              <span className="root-label">{r.label}</span>
+              <button
+                className="x"
+                title="Rescan this folder for new or changed sounds"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void rescanRoot(r.id);
+                }}
+              >
+                ⟳
+              </button>
+              <button
+                className="x"
+                title={`Remove ${r.path} from the library.\nFiles on disk are not touched.`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (
+                    confirm(`Remove "${r.label}" from the library?\n\nNo files on disk are deleted.`)
+                  )
+                    void removeRoot(r.id);
+                }}
+              >
+                ×
+              </button>
+            </div>
+            {visible.map((f) => {
+              const depth = f.path.split("/").length;
+              const open = !collapsed.has(`${r.id}:${f.path}`);
+              const kids = hasKids(f.path);
+              return (
+                <div
+                  key={f.path}
+                  className={
+                    "subfolder" +
+                    (filter.root === r.id && filter.folder === f.path ? " on" : "")
+                  }
+                  style={{ paddingLeft: 8 + depth * 12 }}
+                  title={f.path}
+                  onClick={() => pick(r.id, f.path)}
+                >
+                  <button
+                    className={"twisty" + (open ? " open" : "")}
+                    disabled={!kids}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggle(`${r.id}:${f.path}`);
+                    }}
+                  >
+                    {kids ? "\u25b8" : ""}
+                  </button>
+                  <span className="tagname">{f.path.split("/").pop()}</span>
+                  <span className="tagcount">{f.count}</span>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -306,7 +392,6 @@ export default function App() {
     void useStore.getState().loadFailed();
     // The store restored these from disk; the audio thread has not seen them.
     void invoke("set_volume", { volume: useStore.getState().volume });
-    void invoke("set_looping", { looping: useStore.getState().looping });
     void invoke<string>("device_info").then((device) => useStore.setState({ device }));
 
     const un = listen<{ done: number; total: number }>("scan:progress", (e) =>
@@ -337,23 +422,14 @@ export default function App() {
         case "transport.playPause":
           s.toggle();
           return true;
-        case "transport.playRegion":
-          if (s.region) s.playRegion(s.region);
-          return true;
-        case "transport.loop":
-          s.setLooping(!s.looping);
+        case "transport.restart":
+          s.playFrom(0);
           return true;
         case "nav.up":
           void s.move(-1);
           return true;
         case "nav.down":
           void s.move(1);
-          return true;
-        case "region.in":
-          s.markIn();
-          return true;
-        case "region.out":
-          s.markOut();
           return true;
         case "zoom.in":
           s.zoom(0.5);
@@ -363,9 +439,6 @@ export default function App() {
           return true;
         case "zoom.fit":
           s.zoomToFit();
-          return true;
-        case "zoom.region":
-          s.zoomToRegion();
           return true;
         case "organise.favorite":
           if (item) void s.toggleFavorite(item.id);

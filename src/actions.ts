@@ -21,19 +21,14 @@ export const ACTIONS: ActionDef[] = [
   { id: "search.clear", label: "Clear search", category: "Search", default: "Escape", context: "search" },
 
   { id: "transport.playPause", label: "Play / pause", category: "Transport", default: "Space" },
-  { id: "transport.playRegion", label: "Play region", category: "Transport", default: "Enter" },
-  { id: "transport.loop", label: "Toggle loop", category: "Transport", default: "KeyL" },
+  { id: "transport.restart", label: "Play from start", category: "Transport", default: "Enter" },
 
   { id: "nav.up", label: "Previous sound", category: "Navigation", default: "ArrowUp" },
   { id: "nav.down", label: "Next sound", category: "Navigation", default: "ArrowDown" },
 
-  { id: "region.in", label: "Set region in", category: "Region", default: "BracketLeft" },
-  { id: "region.out", label: "Set region out", category: "Region", default: "BracketRight" },
-
   { id: "zoom.in", label: "Zoom in", category: "Zoom", default: "Equal" },
   { id: "zoom.out", label: "Zoom out", category: "Zoom", default: "Minus" },
   { id: "zoom.fit", label: "Zoom to fit", category: "Zoom", default: "Digit0" },
-  { id: "zoom.region", label: "Zoom to region", category: "Zoom", default: "KeyZ" },
 
   { id: "organise.favorite", label: "Toggle favourite", category: "Organise", default: "KeyF" },
   { id: "organise.tag", label: "Add tag", category: "Organise", default: "KeyT" },
