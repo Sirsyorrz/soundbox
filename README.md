@@ -2,7 +2,7 @@
 
 # SoundBox
 
-[![downloads](https://img.shields.io/github/downloads/Sirsyorrz/soundbox/total)](https://github.com/Sirsyorrz/soundbox/releases)
+[![downloads](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Sirsyorrz/soundbox/badges/downloads.json)](https://github.com/Sirsyorrz/soundbox/releases)
 
 A local sound library browser. Fuzzy search, waveform display, click-to-audition,
 and renaming
