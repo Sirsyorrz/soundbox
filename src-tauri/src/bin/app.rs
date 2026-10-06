@@ -364,8 +364,7 @@ fn tags(state: State<'_, App>) -> Vec<(String, i64)> {
             *counts.entry(t.as_str()).or_default() += 1;
         }
     }
-    let mut out: Vec<(String, i64)> =
-        counts.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    let mut out: Vec<(String, i64)> = counts.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
     out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     out
 }

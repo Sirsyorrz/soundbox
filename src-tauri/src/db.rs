@@ -242,11 +242,7 @@ impl Db {
                     mtime: r.get(10)?,
                     last_played: r.get(11)?,
                     favorite: r.get(12)?,
-                    tags: r
-                        .get::<_, String>(13)?
-                        .split_whitespace()
-                        .map(str::to_string)
-                        .collect(),
+                    tags: r.get::<_, String>(13)?.split_whitespace().map(str::to_string).collect(),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
