@@ -5,28 +5,37 @@
 [![downloads](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Sirsyorrz/soundbox/badges/downloads.json)](https://github.com/Sirsyorrz/soundbox/releases)
 
 A local sound library browser. Fuzzy search, waveform display, click-to-audition,
-and renaming
+tagging and renaming.
 
-Never modifies audio content. Renaming a file on disk is the only write it performs,
-and only when you ask for it.
+Never modifies audio content. Renaming a file on disk is the only change it makes
+to your library, and only when you ask for it. Tags, favourites and analysis live
+in SoundBox's own database.
 
 ## Features
 
 - Fuzzy search across your whole library, per keystroke
-- Waveform view; click anywhere to play from there
+- Waveform view with zoom; click anywhere to play from there
 - Folder tree per library root, click to filter
-- Loudness (EBU R128) and peak dB per file
+- Loudness (EBU R128) and peak dB per file, with optional preview normalisation to -18 LUFS
 - "Find similar" based on audio features
-- Safe rename with an undo log
+- Tags and favourites, exportable and importable as `.sbpack` files to share with others
+- Drag sounds straight out of the list into other apps
+- Safe rename with undo
 - Multiple library roots, grouped into profiles
-- Live updates when files change on disk
+- Rescan a folder to pick up new or changed files
+- Remappable keyboard shortcuts (`Ctrl+/` to view them)
+- Built-in updater
 
-Formats: wav, flac, mp3, ogg, aac, aiff.
+Formats: wav, flac, mp3, ogg (Vorbis), m4a/aac/alac, and the audio track of mp4/mov.
 
 ## Install
 
 Grab the latest installer from the [Releases](https://github.com/Sirsyorrz/SoundBox/releases)
-page. Windows and Linux builds are provided; macOS is best-effort.
+page. Windows and Linux builds are provided. Installed copies offer new versions
+automatically.
+
+- Windows: the `-setup.exe`. It's unsigned, so SmartScreen warns: "More info" then "Run anyway".
+- Linux: the `.AppImage`, `chmod +x`, run.
 
 ## Build from source
 
@@ -41,9 +50,17 @@ npm run tauri build    # installers in src-tauri/target/release/bundle
 
 `./run.sh` builds and runs a release binary directly, without packaging.
 
+There's also a CLI (`soundbox-cli`) sharing the app's active profile, with
+`scan`, `probe`, `stats`, `play`, `search`, `similar`, `pack-export` and
+`pack-import` commands:
+
+```bash
+cd src-tauri
+cargo run --bin soundbox-cli -- search kick
+```
+
 ## Stack
 
 Tauri v2 + React/TypeScript on the front, Rust on the back: `symphonia` for
-decoding, `cpal` for playback, `nucleo` for search, `rusqlite` for metadata.
-
-See [PLAN.md](PLAN.md) for the full architecture.
+decoding, `cpal` for playback, `nucleo-matcher` for search, `ebur128` for loudness,
+`rustfft` for similarity features, `rusqlite` for metadata.
