@@ -6,9 +6,31 @@
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
-.search input[type="text"],
-.search input:not([type]) {
+.search-field {
+  position: relative;
   flex: 1;
+  display: flex;
+}
+.search-field input {
+  flex: 1;
+  padding-right: 28px;
+}
+.search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 16px;
+  line-height: 1;
+}
+.search-clear:hover {
+  color: var(--fg);
 }
 .search label {
   display: flex;

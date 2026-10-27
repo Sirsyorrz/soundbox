@@ -27,16 +27,32 @@ function Search() {
   return (
     <div className="search">
       <button onClick={() => void addFolder()}>Add folder…</button>
-      <input
-        id="search-input"
-        ref={ref}
-        value={query}
-        placeholder="search…   ( / to focus )"
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") setQuery("");
-        }}
-      />
+      <div className="search-field">
+        <input
+          id="search-input"
+          ref={ref}
+          value={query}
+          placeholder="search…   ( / to focus )"
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setQuery("");
+          }}
+        />
+        {query && (
+          <button
+            className="search-clear"
+            title="Clear search"
+            aria-label="Clear search"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setQuery("");
+              ref.current?.focus();
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
       <label title="Match preview level to -18 LUFS">
         <input
           type="checkbox"
