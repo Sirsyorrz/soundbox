@@ -634,3 +634,102 @@ button.danger {
 button.danger:hover:not(:disabled) {
   border-color: #f87171;
 }
+
+.import-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+}
+.import-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+}
+.import-row button {
+  padding: 4px 8px;
+}
+.import-row select {
+  flex: 1;
+  min-width: 0;
+}
+select.dest {
+  max-width: 100%;
+  font-size: var(--fs-sm);
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.job {
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.job-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.job-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-state {
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+.job.bad .job-state {
+  color: var(--bad);
+}
+.job .x {
+  padding: 0 6px;
+  line-height: 1.2;
+  background: none;
+  border-color: transparent;
+  color: var(--fg-faint);
+}
+.job .x:hover {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+.job-bar {
+  height: 3px;
+  margin-top: 3px;
+  background: var(--line-soft);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.job-bar > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+.job-bar.busy > div {
+  opacity: 0.4;
+  animation: job-pulse 1.2s ease-in-out infinite;
+}
+@keyframes job-pulse {
+  50% {
+    opacity: 0.9;
+  }
+}
+.job-error {
+  color: var(--bad);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.setrow .grow {
+  flex: 1;
+  min-width: 0;
+}
+.setrow.clip {
+  align-items: center;
+  padding-top: 0;
+}
+.setrow.clip input {
+  width: 110px;
+}
+.modal .job {
+  padding: var(--sp-1) var(--sp-3);
+}

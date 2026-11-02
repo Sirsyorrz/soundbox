@@ -79,3 +79,47 @@ export interface PackPreview {
   missing: number;
   sample_missing: string[];
 }
+
+export type ImportFormat = "original" | "wav" | "flac" | "mp3";
+
+export interface ToolInfo {
+  path: string | null;
+  version: string | null;
+  managed: boolean;
+}
+
+export interface ToolStatus {
+  ytdlp: ToolInfo;
+  deno: ToolInfo;
+  ffmpeg: ToolInfo;
+  channel: "stable" | "nightly";
+  use_system_ytdlp: boolean;
+  system_ytdlp: string | null;
+  last_update: number;
+  supported: boolean;
+}
+
+export type JobState =
+  | "starting"
+  | "updating"
+  | "running"
+  | "converting"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+/** Mirrors the backend JobEvent; every event carries the full picture. */
+export interface Job {
+  id: number;
+  state: JobState;
+  url: string;
+  dest: string;
+  title: string | null;
+  done: number | null;
+  total: number | null;
+  index: number | null;
+  count: number | null;
+  error: string | null;
+  files: number;
+  outside: number;
+}

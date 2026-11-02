@@ -1,5 +1,5 @@
 import type { Keymap } from "./actions";
-import type { Sort } from "./types";
+import type { ImportFormat, Sort } from "./types";
 
 export interface Settings {
   volume: number;
@@ -8,6 +8,10 @@ export interface Settings {
   sort: Sort;
   desc: boolean;
   keymap: Keymap;
+  importFormat: ImportFormat;
+  importPlaylist: boolean;
+  /** Absolute import folder, per profile id. */
+  importDest: Record<string, string>;
 }
 
 export const DEFAULTS: Settings = {
@@ -17,6 +21,9 @@ export const DEFAULTS: Settings = {
   sort: "relevance",
   desc: false,
   keymap: {},
+  importFormat: "original",
+  importPlaylist: false,
+  importDest: {},
 };
 
 const KEY = "soundbox.settings";

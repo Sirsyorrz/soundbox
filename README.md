@@ -21,6 +21,8 @@ in SoundBox's own database.
 - Safe rename with undo
 - Multiple library roots, grouped into profiles
 - Rescan a folder to pick up new or changed files
+- Import audio from YouTube, SoundCloud, Bandcamp and most other sites into any library folder,
+  optionally converted or clipped. Uses yt-dlp, fetched on first use and kept up to date on its own
 - Remappable keyboard shortcuts (`Ctrl+/` to view them)
 - Built-in updater
 

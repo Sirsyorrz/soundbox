@@ -122,6 +122,38 @@ fn analyse(
     Ok(Outcome::Row(Box::new(row)))
 }
 
+/// Indexes just these files under `root`, for when the new files are already
+/// known (a finished import) and walking the whole root would be wasted work.
+pub fn index_files(
+    db: &Db,
+    cache_dir: &Path,
+    root_id: i64,
+    root: &Path,
+    files: &[PathBuf],
+) -> Result<ScanStats> {
+    let mut stats = ScanStats { total: files.len(), ..Default::default() };
+    for path in files {
+        let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
+        let snap = db.known(root_id, &rel).ok().flatten();
+        match analyse(root, root_id, path, cache_dir, snap) {
+            Ok(Outcome::Skipped) => stats.skipped += 1,
+            Ok(Outcome::Row(row)) => {
+                if row.status == "error" {
+                    stats.failed += 1;
+                } else {
+                    stats.analysed += 1;
+                }
+                db.upsert(&row)?;
+            }
+            Err(e) => {
+                stats.failed += 1;
+                stats.errors.push((path.to_string_lossy().to_string(), e.to_string()));
+            }
+        }
+    }
+    Ok(stats)
+}
+
 pub fn scan_root<F>(
     db: &Db,
     cache_dir: &Path,

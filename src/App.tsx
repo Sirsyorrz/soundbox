@@ -11,6 +11,8 @@ import { Splitter, useSplitters } from "./panels/Splitter";
 import { Updater } from "./panels/Updater";
 import { Shortcuts } from "./panels/Shortcuts";
 import { Settings } from "./panels/Settings";
+import { ImportBar, ImportDialog } from "./panels/Import";
+import type { Job } from "./types";
 import { ACTIONS, comboOf, resolveTable } from "./actions";
 import "./app.css";
 
@@ -26,7 +28,7 @@ function Search() {
 
   return (
     <div className="search">
-      <button onClick={() => void addFolder()}>Add folder…</button>
+      <button onClick={() => void addFolder()}>Add folder</button>
       <div className="search-field">
         <input
           id="search-input"
@@ -134,6 +136,8 @@ function Detail() {
 function Sidebar() {
   return (
     <div className="sidebar">
+      <ImportBar />
+      <ImportDialog />
       <Profiles />
 
       <Failed />
@@ -413,11 +417,21 @@ export default function App() {
     const un = listen<{ done: number; total: number }>("scan:progress", (e) =>
       useStore.setState({ scanning: e.payload }),
     );
+    const unJob = listen<Job>("download:update", (e) => void useStore.getState().onJob(e.payload));
+    const unTools = listen<{ stage: string; done: number; total: number | null }>(
+      "tools:progress",
+      (e) => {
+        // Events can arrive after the install call has already returned.
+        if (useStore.getState().toolProgress) useStore.setState({ toolProgress: e.payload });
+      },
+    );
 
     const id = setInterval(() => void useStore.getState().tick(), 33);
     return () => {
       clearInterval(id);
       void un.then((f) => f());
+      void unJob.then((f) => f());
+      void unTools.then((f) => f());
     };
   }, []);
 
@@ -485,6 +499,8 @@ export default function App() {
       // ordinary letters are never swallowed.
       const def = ACTIONS.find((a) => a.id === id);
       if (typing && def?.context !== "search") return;
+      // Inputs that handle their own Escape and Enter, like the import box.
+      if (typing && el?.closest("[data-own-keys]")) return;
 
       if (run(id)) e.preventDefault();
     };

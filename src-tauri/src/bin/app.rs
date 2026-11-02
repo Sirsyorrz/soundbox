@@ -1,15 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use soundbox::db::Db;
+use soundbox::download::{self, Line};
 use soundbox::player::{normalise_gain, Cmd, Player};
 use soundbox::profiles::{self, Registry};
 use soundbox::search::{Filter, Hit, Index, Sort};
 use soundbox::similar::{SimilarIndex, DEFAULT_DURATION_RATIO};
-use soundbox::{audio, cache, pack, rename, scan};
+use soundbox::{audio, cache, pack, rename, scan, tools};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -22,6 +25,13 @@ struct App {
     base: PathBuf,
     reg: Mutex<Registry>,
     cancel_scan: std::sync::atomic::AtomicBool,
+    /// Running imports, job id to yt-dlp's pid.
+    jobs: Mutex<HashMap<u64, u32>>,
+    cancelled: Mutex<HashSet<u64>>,
+    next_job: AtomicU64,
+    /// Held while installing or updating tools, so two imports starting at once
+    /// do not both rewrite yt-dlp.
+    tool_lock: Mutex<()>,
 }
 
 struct CurrentFile {
@@ -688,6 +698,305 @@ fn device_info(state: State<'_, App>) -> String {
     }
 }
 
+#[derive(Serialize, Clone)]
+struct ToolProgress {
+    stage: String,
+    done: u64,
+    total: Option<u64>,
+}
+
+#[tauri::command]
+async fn tools_status(state: State<'_, App>) -> Result<tools::Status, String> {
+    let dir = tools::dir(&state.base);
+    tauri::async_runtime::spawn_blocking(move || tools::status(&dir))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Installs whatever is missing. ffmpeg is large and only needed for
+/// converting or clipping, so it is only fetched when asked for.
+#[tauri::command]
+async fn tools_install(handle: tauri::AppHandle, ffmpeg: bool) -> Result<tools::Status, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = handle.state::<App>();
+        let dir = tools::dir(&state.base);
+        let _guard = state.tool_lock.lock().unwrap();
+        let mut cfg = tools::load_config(&dir);
+        let found = tools::resolve(&dir, &cfg);
+        let progress = |stage: &str, done: u64, total: Option<u64>| {
+            let _ =
+                handle.emit("tools:progress", ToolProgress { stage: stage.into(), done, total });
+        };
+
+        if found.ytdlp.is_none() {
+            if cfg.use_system_ytdlp {
+                return Err(anyhow::anyhow!(
+                    "no yt-dlp on PATH. Install it, or turn off \"use system yt-dlp\" in Settings"
+                ));
+            }
+            tools::install_ytdlp(&dir, cfg.channel, &progress)?;
+            cfg.last_update = soundbox::db::now();
+            tools::save_config(&dir, &cfg)?;
+        }
+        if found.deno.is_none() {
+            tools::install_deno(&dir, &progress)?;
+        }
+        if ffmpeg && found.ffmpeg.is_none() {
+            tools::install_ffmpeg(&dir, &progress)?;
+        }
+        Ok(tools::status(&dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn tools_update(handle: tauri::AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = handle.state::<App>();
+        let _guard = state.tool_lock.lock().unwrap();
+        tools::update_ytdlp(&tools::dir(&state.base)).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn tools_configure(
+    state: State<'_, App>,
+    channel: tools::Channel,
+    use_system_ytdlp: bool,
+) -> Result<(), String> {
+    let dir = tools::dir(&state.base);
+    let mut cfg = tools::load_config(&dir);
+    if cfg.channel != channel {
+        // Forces the next import to switch channel instead of waiting a day.
+        cfg.last_update = 0;
+    }
+    cfg.channel = channel;
+    cfg.use_system_ytdlp = use_system_ytdlp;
+    tools::save_config(&dir, &cfg).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn tools_remove(handle: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = handle.state::<App>();
+        if !state.jobs.lock().unwrap().is_empty() {
+            return Err("wait for imports to finish first".to_string());
+        }
+        let _guard = state.tool_lock.lock().unwrap();
+        let dir = tools::dir(&state.base);
+        let cfg = tools::load_config(&dir);
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+        // Preferences outlive the binaries.
+        let kept = tools::Config { last_update: 0, ..cfg };
+        tools::save_config(&dir, &kept).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn canonical_roots(state: &App) -> Vec<(i64, PathBuf)> {
+    let roots = state.db.lock().unwrap().roots().unwrap_or_default();
+    roots
+        .into_iter()
+        .filter_map(|(id, p, _)| std::fs::canonicalize(&p).ok().map(|c| (id, c)))
+        .collect()
+}
+
+/// The innermost root holding `path`. Canonical on both sides, so case,
+/// symlinks and `\\?\` prefixes on Windows all compare equal.
+fn containing_root<'a>(roots: &'a [(i64, PathBuf)], path: &Path) -> Option<&'a (i64, PathBuf)> {
+    roots.iter().filter(|(_, r)| path.starts_with(r)).max_by_key(|(_, r)| r.components().count())
+}
+
+#[tauri::command]
+fn root_for(state: State<'_, App>, path: String) -> Option<i64> {
+    let canon = std::fs::canonicalize(&path).ok()?;
+    containing_root(&canonical_roots(&state), &canon).map(|(id, _)| *id)
+}
+
+/// Returns (indexed, outside any library folder).
+fn index_downloaded(state: &App, files: &[PathBuf]) -> Result<(usize, usize), String> {
+    if files.is_empty() {
+        return Ok((0, 0));
+    }
+    let roots = canonical_roots(state);
+    let mut groups: HashMap<i64, (PathBuf, Vec<PathBuf>)> = HashMap::new();
+    let mut outside = 0;
+    for f in files {
+        let Ok(canon) = std::fs::canonicalize(f) else {
+            outside += 1;
+            continue;
+        };
+        match containing_root(&roots, &canon) {
+            Some((id, root)) => {
+                groups.entry(*id).or_insert_with(|| (root.clone(), Vec::new())).1.push(canon)
+            }
+            None => outside += 1,
+        }
+    }
+    let mut indexed = 0;
+    {
+        let db = state.db.lock().unwrap();
+        for (id, (root, list)) in groups {
+            let s =
+                scan::index_files(&db, &state.base, id, &root, &list).map_err(|e| e.to_string())?;
+            indexed += s.analysed + s.failed + s.skipped;
+        }
+    }
+    reload_index(state)?;
+    Ok((indexed, outside))
+}
+
+#[derive(Serialize, Clone, Default)]
+struct JobEvent {
+    id: u64,
+    state: &'static str,
+    url: String,
+    dest: String,
+    title: Option<String>,
+    done: Option<u64>,
+    total: Option<u64>,
+    index: Option<u32>,
+    count: Option<u32>,
+    error: Option<String>,
+    files: usize,
+    outside: usize,
+}
+
+#[tauri::command]
+fn download_start(
+    handle: tauri::AppHandle,
+    state: State<'_, App>,
+    req: download::Request,
+) -> Result<u64, String> {
+    req.validate().map_err(|e| e.to_string())?;
+    let dir = tools::dir(&state.base);
+    let found = tools::resolve(&dir, &tools::load_config(&dir));
+    if found.ytdlp.is_none() {
+        return Err("yt-dlp is not set up yet".into());
+    }
+    if req.needs_ffmpeg() && found.ffmpeg.is_none() {
+        return Err("converting or clipping needs ffmpeg, which is not set up yet".into());
+    }
+    std::fs::create_dir_all(&req.dest)
+        .map_err(|e| format!("could not create {}: {e}", req.dest))?;
+    let id = state.next_job.fetch_add(1, Ordering::Relaxed) + 1;
+    std::thread::spawn(move || run_job(handle, id, req));
+    Ok(id)
+}
+
+fn run_job(handle: tauri::AppHandle, id: u64, req: download::Request) {
+    let state = handle.state::<App>();
+    let mut ev = JobEvent {
+        id,
+        state: "starting",
+        url: req.url.clone(),
+        dest: req.dest.clone(),
+        ..Default::default()
+    };
+    let emit = |ev: &JobEvent| {
+        let _ = handle.emit("download:update", ev.clone());
+    };
+    emit(&ev);
+
+    let dir = tools::dir(&state.base);
+    if tools::resolve(&dir, &tools::load_config(&dir)).ytdlp_managed
+        && tools::update_due(&tools::load_config(&dir), soundbox::db::now())
+    {
+        ev.state = "updating";
+        emit(&ev);
+        let _guard = state.tool_lock.lock().unwrap();
+        // Another import may have updated while this one waited for the lock.
+        if tools::update_due(&tools::load_config(&dir), soundbox::db::now()) {
+            // A failed update is not fatal: the installed copy may still work.
+            let _ = tools::update_ytdlp(&dir);
+        }
+    }
+
+    let found = tools::resolve(&dir, &tools::load_config(&dir));
+    let temp = dir.join("tmp").join(id.to_string());
+    let log = temp.join("soundbox-files.txt");
+    let outcome = (|| -> Result<(), String> {
+        let ytdlp = found.ytdlp.clone().ok_or("yt-dlp is not set up yet")?;
+        std::fs::create_dir_all(&temp).map_err(|e| e.to_string())?;
+        let args = download::args(&req, &found, &temp, &log);
+        let child = download::spawn(&ytdlp, &dir, &args).map_err(|e| e.to_string())?;
+        state.jobs.lock().unwrap().insert(id, child.id());
+        // Cancelled while updating or starting up.
+        if state.cancelled.lock().unwrap().contains(&id) {
+            download::kill_tree(child.id());
+        }
+        ev.state = "running";
+        emit(&ev);
+
+        let mut last = std::time::Instant::now();
+        let result = download::drive(child, |line| {
+            match line {
+                Line::Progress { done, total, index, count, title } => {
+                    let fresh = ev.title.as_deref() != Some(title.as_str());
+                    ev.state = "running";
+                    ev.title = Some(title);
+                    (ev.done, ev.total, ev.index, ev.count) = (done, total, index, count);
+                    // yt-dlp reports many times a second; the UI needs a few.
+                    if !fresh && last.elapsed() < std::time::Duration::from_millis(150) {
+                        return;
+                    }
+                }
+                Line::Converting { title } => {
+                    ev.state = "converting";
+                    ev.title = Some(title);
+                }
+                _ => return,
+            }
+            last = std::time::Instant::now();
+            emit(&ev);
+        });
+        result
+    })();
+    state.jobs.lock().unwrap().remove(&id);
+    let cancelled = state.cancelled.lock().unwrap().remove(&id);
+
+    // Whatever finished is kept and indexed, even from a cancelled or partly
+    // failed playlist.
+    let files = download::read_files_log(&log);
+    let _ = std::fs::remove_dir_all(&temp);
+    ev.done = None;
+    ev.total = None;
+    match index_downloaded(&state, &files) {
+        Ok((n, outside)) => (ev.files, ev.outside) = (n, outside),
+        Err(e) => ev.error = Some(format!("downloaded, but indexing failed: {e}")),
+    }
+    ev.state = if cancelled {
+        "cancelled"
+    } else if let Err(e) = outcome {
+        ev.error = Some(e);
+        if files.is_empty() {
+            "failed"
+        } else {
+            "done"
+        }
+    } else {
+        "done"
+    };
+    emit(&ev);
+}
+
+#[tauri::command]
+fn download_cancel(state: State<'_, App>, id: u64) {
+    state.cancelled.lock().unwrap().insert(id);
+    if let Some(pid) = state.jobs.lock().unwrap().get(&id) {
+        download::kill_tree(*pid);
+    }
+}
+
 fn main() {
     // WebKitGTK's DMA-BUF renderer hard-crashes with a Wayland protocol error on
     // NVIDIA. Must be set before GTK initialises.
@@ -723,7 +1032,13 @@ fn main() {
                 base,
                 reg: Mutex::new(reg),
                 cancel_scan: std::sync::atomic::AtomicBool::new(false),
+                jobs: Mutex::new(HashMap::new()),
+                cancelled: Mutex::new(HashSet::new()),
+                next_job: AtomicU64::new(0),
+                tool_lock: Mutex::new(()),
             });
+            // Partial downloads from a crash or a killed app.
+            let _ = std::fs::remove_dir_all(tools::dir(&base_dir()).join("tmp"));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -766,8 +1081,25 @@ fn main() {
             remove_root,
             rescan_root,
             status,
-            device_info
+            device_info,
+            tools_status,
+            tools_install,
+            tools_update,
+            tools_configure,
+            tools_remove,
+            root_for,
+            download_start,
+            download_cancel
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // yt-dlp runs in its own process group, so it would otherwise keep
+            // downloading after the window closes.
+            if let tauri::RunEvent::Exit = event {
+                for pid in app.state::<App>().jobs.lock().unwrap().values() {
+                    download::kill_tree(*pid);
+                }
+            }
+        });
 }

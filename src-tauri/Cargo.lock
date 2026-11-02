@@ -1149,6 +1149,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f9e3d69d39e4862ffed03ed071a76f9a13ba1d9109d355b0f0aa6b15e393c4"
 dependencies = [
  "futures-core",
+ "futures-sink",
 ]
 
 [[package]]
@@ -3110,6 +3111,7 @@ checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -3718,10 +3720,13 @@ dependencies = [
  "flate2",
  "nucleo-matcher",
  "rayon",
+ "reqwest",
  "rusqlite",
  "rustfft",
+ "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "symphonia",
  "tauri",
  "tauri-build",
@@ -3731,6 +3736,7 @@ dependencies = [
  "tauri-plugin-updater",
  "thiserror 2.0.20",
  "walkdir",
+ "zip",
 ]
 
 [[package]]
@@ -6020,6 +6026,7 @@ checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
 dependencies = [
  "arbitrary",
  "crc32fast",
+ "flate2",
  "indexmap 2.14.1",
  "memchr",
 ]

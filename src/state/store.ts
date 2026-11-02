@@ -4,12 +4,15 @@ import type {
   Filter,
   FolderNode,
   Hit,
+  ImportFormat,
   Item,
+  Job,
   Loaded,
   PackPreview,
   Registry,
   Root,
   Sort,
+  ToolStatus,
 } from "../types";
 import { clearSparks } from "../panels/Sparkline";
 import { loadSettings, saveSettings } from "../settings";
@@ -75,7 +78,7 @@ interface State {
   removeRoot: (id: number) => Promise<void>;
   rescanRoot: (id: number) => Promise<void>;
   setLayout: (l: LayoutName) => void;
-  addFolder: () => Promise<void>;
+  addFolder: (dir?: string) => Promise<boolean>;
   registry: Registry | null;
   updateNonce: number;
   keymap: Keymap;
@@ -102,7 +105,40 @@ interface State {
   importPack: (path?: string) => Promise<void>;
   tick: () => Promise<void>;
   say: (m: string) => void;
+
+  jobs: Job[];
+  tools: ToolStatus | null;
+  /** Set while yt-dlp, Deno or ffmpeg are being fetched. */
+  toolProgress: { stage: string; done: number; total: number | null } | null;
+  showImport: boolean;
+  setShowImport: (v: boolean) => void;
+  importFormat: ImportFormat;
+  setImportFormat: (f: ImportFormat) => void;
+  importPlaylist: boolean;
+  setImportPlaylist: (v: boolean) => void;
+  importDest: Record<string, string>;
+  /** The active profile's import folder, falling back to its first root. */
+  importDestPath: () => string | null;
+  setImportDest: (path: string) => void;
+  browseImportDest: () => Promise<void>;
+  loadTools: () => Promise<ToolStatus>;
+  ensureTools: (ffmpeg: boolean) => Promise<boolean>;
+  startImport: (
+    url: string,
+    opts?: { format?: ImportFormat; playlist?: boolean; clip?: [string, string] | null },
+  ) => Promise<boolean>;
+  cancelImport: (id: number) => void;
+  dismissJob: (id: number) => void;
+  clearFinishedJobs: () => void;
+  onJob: (job: Job) => Promise<void>;
+  updateYtdlp: () => Promise<void>;
+  configureTools: (channel: "stable" | "nightly", useSystem: boolean) => Promise<void>;
+  removeTools: () => Promise<void>;
 }
+
+const FINISHED = new Set(["done", "failed", "cancelled"]);
+
+export const isFinished = (j: Job) => FINISHED.has(j.state);
 
 const SAVED = loadSettings();
 
@@ -137,8 +173,200 @@ export const useStore = create<State>((set, get) => ({
   device: "",
   layout: "default",
   message: "",
+  jobs: [],
+  tools: null,
+  toolProgress: null,
+  showImport: false,
+  importFormat: SAVED.importFormat,
+  importPlaylist: SAVED.importPlaylist,
+  importDest: SAVED.importDest,
 
   say: (message) => set({ message }),
+
+  setShowImport: (showImport) => set({ showImport }),
+
+  setImportFormat: (importFormat) => {
+    set({ importFormat });
+    saveSettings({ importFormat });
+  },
+
+  setImportPlaylist: (importPlaylist) => {
+    set({ importPlaylist });
+    saveSettings({ importPlaylist });
+  },
+
+  importDestPath: () => {
+    const { registry, importDest, roots } = get();
+    const saved = registry ? importDest[registry.active] : undefined;
+    return saved ?? roots[0]?.path ?? null;
+  },
+
+  setImportDest: (path) => {
+    const active = get().registry?.active;
+    if (!active) return;
+    const importDest = { ...get().importDest, [active]: path };
+    set({ importDest });
+    saveSettings({ importDest });
+  },
+
+  browseImportDest: async () => {
+    const dir = await invoke<string | null>("pick_folder");
+    if (!dir) return;
+    const root = await invoke<number | null>("root_for", { path: dir });
+    if (root == null) {
+      // Imports land on disk either way, but outside the library they would
+      // never show up, which looks like the import failed.
+      const add = confirm(
+        `${dir}\n\nis not in this profile's library, so downloads saved there would not show up.\n\n` +
+          `Add it as a library folder?`,
+      );
+      if (!add || !(await get().addFolder(dir))) return;
+    }
+    get().setImportDest(dir);
+  },
+
+  loadTools: async () => {
+    const tools = await invoke<ToolStatus>("tools_status");
+    set({ tools });
+    return tools;
+  },
+
+  ensureTools: async (ffmpeg) => {
+    if (get().toolProgress) {
+      set({ message: "setup is still running" });
+      return false;
+    }
+    const t = await get().loadTools();
+    if (!t.ytdlp.path && t.use_system_ytdlp) {
+      set({ message: 'no yt-dlp on PATH. Install it or turn off "use system yt-dlp" in Settings' });
+      return false;
+    }
+    if (!t.ytdlp.path && !t.supported) {
+      set({ message: "no yt-dlp build for this platform; install it and enable system yt-dlp" });
+      return false;
+    }
+    const missing: string[] = [];
+    if (!t.ytdlp.path) missing.push("yt-dlp, the downloader (about 40 MB)");
+    if (!t.deno.path) missing.push("Deno, which YouTube needs (about 40 MB)");
+    if (ffmpeg && !t.ffmpeg.path)
+      missing.push("ffmpeg, for converting and clipping (about 160 to 200 MB)");
+    if (missing.length === 0) return true;
+    if (
+      !confirm(
+        `Downloading needs:\n\n${missing.map((m) => `  ${m}`).join("\n")}\n\n` +
+          `These are downloaded once into SoundBox's data folder. yt-dlp then keeps itself up to date.`,
+      )
+    )
+      return false;
+    set({ toolProgress: { stage: "starting", done: 0, total: null } });
+    try {
+      set({ tools: await invoke<ToolStatus>("tools_install", { ffmpeg }) });
+      return true;
+    } catch (e) {
+      set({ message: `setup failed: ${e}` });
+      return false;
+    } finally {
+      set({ toolProgress: null });
+    }
+  },
+
+  startImport: async (url, opts = {}) => {
+    const dest = get().importDestPath();
+    if (!dest) {
+      set({ message: "add a library folder first, so downloads have somewhere to go" });
+      return false;
+    }
+    const format = opts.format ?? get().importFormat;
+    const playlist = opts.playlist ?? get().importPlaylist;
+    const clip = opts.clip ?? null;
+    if (!(await get().ensureTools(format !== "original" || clip != null))) return false;
+    try {
+      const req = { url: url.trim(), dest, format, playlist, clip };
+      const id = await invoke<number>("download_start", { req });
+      const job: Job = {
+        id,
+        state: "starting",
+        url: req.url,
+        dest,
+        title: null,
+        done: null,
+        total: null,
+        index: null,
+        count: null,
+        error: null,
+        files: 0,
+        outside: 0,
+      };
+      // The backend's first event can beat this, so never overwrite one.
+      set((s) => (s.jobs.some((j) => j.id === id) ? {} : { jobs: [...s.jobs, job] }));
+      return true;
+    } catch (e) {
+      set({ message: `download failed: ${e}` });
+      return false;
+    }
+  },
+
+  cancelImport: (id) => void invoke("download_cancel", { id }),
+
+  dismissJob: (id) => set((s) => ({ jobs: s.jobs.filter((j) => j.id !== id) })),
+
+  clearFinishedJobs: () => set((s) => ({ jobs: s.jobs.filter((j) => !isFinished(j)) })),
+
+  onJob: async (job) => {
+    if (job.error?.includes("Requested format is not available")) {
+      job = {
+        ...job,
+        error: "no format SoundBox can play directly. Pick WAV, FLAC or MP3 in download options.",
+      };
+    }
+    set((s) => {
+      const i = s.jobs.findIndex((j) => j.id === job.id);
+      if (i < 0) return { jobs: [...s.jobs, job] };
+      const jobs = s.jobs.slice();
+      jobs[i] = job;
+      return { jobs };
+    });
+    if (!isFinished(job)) return;
+
+    const name = job.title ?? job.url;
+    const parts: string[] = [];
+    if (job.state === "failed") parts.push(`download failed: ${job.error ?? name}`);
+    else if (job.state === "cancelled") parts.push(`download cancelled: ${name}`);
+    else parts.push(`downloaded ${job.files} sound${job.files === 1 ? "" : "s"}: ${name}`);
+    if (job.outside) parts.push(`${job.outside} saved outside the library`);
+    if (job.state === "done" && job.error) parts.push(`some failed: ${job.error}`);
+    set({ message: parts.join(", ") });
+    if (job.files) {
+      await get().loadFolders();
+      await get().loadFailed();
+      await get().refresh();
+    }
+  },
+
+  updateYtdlp: async () => {
+    set({ message: "updating yt-dlp…" });
+    try {
+      set({ message: `yt-dlp: ${await invoke<string>("tools_update")}` });
+    } catch (e) {
+      set({ message: `yt-dlp update failed: ${e}` });
+    }
+    await get().loadTools();
+  },
+
+  configureTools: async (channel, useSystem) => {
+    await invoke("tools_configure", { channel, useSystemYtdlp: useSystem });
+    await get().loadTools();
+  },
+
+  removeTools: async () => {
+    try {
+      await invoke("tools_remove");
+      set({ message: "removed downloaded tools" });
+    } catch (e) {
+      set({ message: `could not remove tools: ${e}` });
+    }
+    await get().loadTools();
+  },
 
   setQuery: (query) => {
     set({ query });
@@ -446,9 +674,9 @@ export const useStore = create<State>((set, get) => ({
 
   setLayout: (layout) => set({ layout }),
 
-  addFolder: async () => {
-    const dir = await invoke<string | null>("pick_folder");
-    if (!dir) return;
+  addFolder: async (picked) => {
+    const dir = picked ?? (await invoke<string | null>("pick_folder"));
+    if (!dir) return false;
     set({ scanning: { done: 0, total: 0 }, message: `scanning ${dir}` });
     try {
       const n = await invoke<number>("add_root", { path: dir });
@@ -462,8 +690,10 @@ export const useStore = create<State>((set, get) => ({
       if (found && confirm(`This folder ships tags in ${found.split(/[/\\]/).pop()}.\n\nImport them?`)) {
         await get().importPack(found);
       }
+      return true;
     } catch (e) {
       set({ message: `scan failed: ${e}` });
+      return false;
     } finally {
       set({ scanning: null });
     }

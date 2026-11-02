@@ -48,3 +48,9 @@ nucleo-matcher = "0.3.1"
 flate2 = "1.1.10"
 tauri-plugin-updater = "2.11.0"
 tauri-plugin-process = "2.3.1"
+# Same reqwest/rustls the updater already pulls in, so fetching yt-dlp and
+# friends adds no second TLS stack.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+sha2 = "0.10"
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }

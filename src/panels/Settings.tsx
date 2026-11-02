@@ -1,4 +1,116 @@
-import { useStore } from "../state/store";
+import { useEffect } from "react";
+import { isFinished, useStore } from "../state/store";
+import type { ToolInfo } from "../types";
+
+function where(t: ToolInfo) {
+  if (!t.path) return "not installed";
+  return `${t.version ?? "unknown version"}, ${t.managed ? "SoundBox's copy" : t.path}`;
+}
+
+function ImportSettings() {
+  const tools = useStore((s) => s.tools);
+  const busy = useStore((s) => s.jobs.some((j) => !isFinished(j)));
+  const s = useStore.getState();
+
+  useEffect(() => {
+    void useStore.getState().loadTools();
+  }, []);
+
+  if (!tools) return <div className="pad dim">checking tools…</div>;
+  const last = tools.last_update
+    ? new Date(tools.last_update * 1000).toLocaleString()
+    : "never";
+
+  return (
+    <>
+      <div className="setrow">
+        <div className="setlabel">
+          yt-dlp
+          <div className="dim">
+            {where(tools.ytdlp)}
+            {tools.ytdlp.managed && tools.ytdlp.path && (
+              <>
+                <br />
+                Checks for updates once a day when you download. Last checked {last}.
+              </>
+            )}
+          </div>
+        </div>
+        <button
+          disabled={!tools.ytdlp.managed || !tools.ytdlp.path}
+          title="Sites change often. If downloads start failing, update first."
+          onClick={() => void s.updateYtdlp()}
+        >
+          Update now
+        </button>
+      </div>
+      <div className="setrow">
+        <div className="setlabel">
+          Update channel
+          <div className="dim">Nightly usually gets site fixes days before stable.</div>
+        </div>
+        <select
+          value={tools.channel}
+          disabled={tools.use_system_ytdlp}
+          onChange={(e) =>
+            void s.configureTools(e.target.value as "stable" | "nightly", tools.use_system_ytdlp)
+          }
+        >
+          <option value="stable">stable</option>
+          <option value="nightly">nightly</option>
+        </select>
+      </div>
+      <div className="setrow">
+        <div className="setlabel">
+          Use system yt-dlp
+          <div className="dim">
+            {tools.system_ytdlp
+              ? `Use ${tools.system_ytdlp} instead. Your package manager keeps it updated, not SoundBox.`
+              : "No yt-dlp found on PATH."}
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={tools.use_system_ytdlp}
+          disabled={!tools.system_ytdlp && !tools.use_system_ytdlp}
+          onChange={(e) => void s.configureTools(tools.channel, e.target.checked)}
+        />
+      </div>
+      <div className="setrow">
+        <div className="setlabel">
+          Deno
+          <div className="dim">{where(tools.deno)}. yt-dlp needs it for YouTube.</div>
+        </div>
+      </div>
+      <div className="setrow">
+        <div className="setlabel">
+          ffmpeg
+          <div className="dim">{where(tools.ffmpeg)}. Needed for converting and clipping.</div>
+        </div>
+        {!tools.ffmpeg.path && (
+          <button onClick={() => void s.ensureTools(true)}>Get ffmpeg</button>
+        )}
+      </div>
+      <div className="setrow">
+        <div className="setlabel">
+          Remove downloaded tools
+          <div className="dim">
+            Deletes SoundBox's copies of yt-dlp, Deno and ffmpeg. They are fetched again on the
+            next download.
+          </div>
+        </div>
+        <button
+          disabled={busy || ![tools.ytdlp, tools.deno, tools.ffmpeg].some((t) => t.managed)}
+          onClick={() => {
+            if (confirm("Remove SoundBox's copies of yt-dlp, Deno and ffmpeg?")) void s.removeTools();
+          }}
+        >
+          Remove
+        </button>
+      </div>
+    </>
+  );
+}
 
 /** One place for everything that is not part of browsing the library. */
 export function Settings() {
@@ -87,6 +199,9 @@ export function Settings() {
               Clear…
             </button>
           </div>
+
+          <div className="sidebar-h">Downloading</div>
+          <ImportSettings />
 
           <div className="sidebar-h">Updates</div>
           <div className="setrow">
