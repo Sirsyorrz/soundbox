@@ -32,7 +32,7 @@ function Search() {
           id="search-input"
           ref={ref}
           value={query}
-          placeholder="search…   ( / to focus )"
+          placeholder="search   ( / to focus )"
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Escape") setQuery("");
