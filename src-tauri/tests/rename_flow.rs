@@ -127,3 +127,18 @@ fn tags_survive_a_rename() {
 
     let _ = std::fs::remove_dir_all(&f.dir);
 }
+
+#[test]
+fn rescan_drops_files_deleted_from_disk() {
+    let f = setup("deleted");
+    let id = f.db.roots().unwrap()[0].0;
+
+    std::fs::remove_file(f.dir.join("occupied.wav")).unwrap();
+    let stats = scan::scan_root(&f.db, &f.dir, id, &f.dir, |_| {}).unwrap();
+
+    assert_eq!(stats.removed, 1);
+    let names: Vec<String> = f.db.all_items().unwrap().into_iter().map(|i| i.filename).collect();
+    assert_eq!(names, vec!["original.wav".to_string()]);
+
+    let _ = std::fs::remove_dir_all(&f.dir);
+}

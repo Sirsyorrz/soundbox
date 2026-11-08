@@ -208,7 +208,7 @@ function FolderTree() {
               <span className="root-label">{r.label}</span>
               <button
                 className="x"
-                title="Rescan this folder for new or changed sounds"
+                title="Rescan this folder for new, changed or deleted sounds"
                 onClick={(e) => {
                   e.stopPropagation();
                   void rescanRoot(r.id);

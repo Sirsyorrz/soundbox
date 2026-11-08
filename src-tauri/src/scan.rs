@@ -20,6 +20,7 @@ pub struct ScanStats {
     pub skipped: usize,
     pub failed: usize,
     pub cancelled: bool,
+    pub removed: usize,
     pub elapsed_ms: u128,
     /// (path, reason) for files that produced no row at all. These are retried
     /// on every scan, so they must be surfaced rather than silently counted.
@@ -32,11 +33,20 @@ pub struct Progress {
     pub path: String,
 }
 
-pub fn candidates(root: &Path) -> Vec<PathBuf> {
-    WalkDir::new(root)
+/// The bool is false when part of the tree could not be read, so the list may
+/// be missing files that still exist.
+pub fn candidates(root: &Path) -> (Vec<PathBuf>, bool) {
+    let mut complete = true;
+    let files = WalkDir::new(root)
         .follow_links(false)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(|e| match e {
+            Ok(e) => Some(e),
+            Err(_) => {
+                complete = false;
+                None
+            }
+        })
         .filter(|e| e.file_type().is_file())
         .map(|e| e.into_path())
         .filter(|p| {
@@ -45,7 +55,8 @@ pub fn candidates(root: &Path) -> Vec<PathBuf> {
                 .map(|x| AUDIO_EXTS.contains(&x.to_ascii_lowercase().as_str()))
                 .unwrap_or(false)
         })
-        .collect()
+        .collect();
+    (files, complete)
 }
 
 enum Outcome {
@@ -182,7 +193,7 @@ where
     F: Fn(Progress) + Sync + Send,
 {
     let started = std::time::Instant::now();
-    let files = candidates(root);
+    let (files, walk_complete) = candidates(root);
     let total = files.len();
 
     // Read the existing index up front: SQLite reads from many rayon threads
@@ -229,6 +240,15 @@ where
                 stats.errors.push((path.to_string_lossy().to_string(), e.to_string()));
             }
         }
+    }
+    // Pruning off an incomplete walk would drop entries for files that are
+    // only temporarily unreadable.
+    if walk_complete {
+        let present: std::collections::HashSet<String> = files
+            .iter()
+            .map(|p| p.strip_prefix(root).unwrap_or(p).to_string_lossy().to_string())
+            .collect();
+        stats.removed = db.prune_missing(root_id, &present)?;
     }
     tx.commit()?;
 

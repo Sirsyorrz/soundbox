@@ -170,6 +170,27 @@ impl Db {
         Ok(r)
     }
 
+    /// Drops rows under `root_id` whose path is not in `present`. Tags and
+    /// favourites are keyed on content, so they return if the file does.
+    pub fn prune_missing(
+        &self,
+        root_id: i64,
+        present: &std::collections::HashSet<String>,
+    ) -> Result<usize> {
+        let gone: Vec<i64> = {
+            let mut stmt =
+                self.conn.prepare("SELECT id, rel_path FROM files WHERE root_id = ?1")?;
+            let rows = stmt
+                .query_map(params![root_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows.into_iter().filter(|(_, rel)| !present.contains(rel)).map(|(id, _)| id).collect()
+        };
+        for id in &gone {
+            self.conn.execute("DELETE FROM files WHERE id = ?1", params![id])?;
+        }
+        Ok(gone.len())
+    }
+
     pub fn upsert(&self, f: &FileRow) -> Result<()> {
         // Keyed on location: a path holds exactly one file, and its content may
         // change in place. Metadata is keyed on content_key elsewhere.
